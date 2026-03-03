@@ -8,28 +8,35 @@ app.use(cors());
 app.get('/treno/:numero', async (req, res) => {
     try {
         const numero = req.params.numero;
-        // Usiamo l'endpoint mobile che è meno protetto dai firewall
-        const urlRicerca = `http://www.viaggiatreno.it/infomobilita/vt_pax_internet/mobile/numero?lang=IT&treno=${numero}`;
         
-        const response = await axios.get(urlRicerca, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept': 'application/json, text/plain, */*',
-                'Referer': 'http://www.viaggiatreno.it/infomobilita/index.jsp',
-                'X-Requested-With': 'XMLHttpRequest'
-            }
+        // FASE 1: Troviamo l'ID del treno e la stazione di partenza
+        // Questo endpoint è solitamente più stabile e meno protetto
+        const cercaTrenoUrl = `http://www.viaggiatreno.it/infomobilita/vt_pax_internet/mobile/numero?lang=IT&treno=${numero}`;
+        
+        const infoTreno = await axios.get(cercaTrenoUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
 
-        // Se il server risponde con HTML (redirect), inviamo un errore gestibile
-        if (typeof response.data === 'string' && response.data.includes('<!DOCTYPE html>')) {
-            return res.status(403).json({ error: "Accesso temporaneamente limitato dal fornitore dati." });
+        // Se infoTreno.data è una stringa vuota o HTML, il treno non esiste o siamo bloccati
+        if (!infoTreno.data || typeof infoTreno.data === 'string') {
+            return res.status(404).json({ error: "Treno non trovato o server occupato" });
         }
 
-        res.json(response.data);
+        // FASE 2: Recuperiamo il dettaglio (ID stazione e codice treno)
+        // L'oggetto restituito da ViaggiaTreno contiene codOrigine e numeroTreno
+        const { codOrigine, numeroTreno } = infoTreno.data;
+
+        // FASE 3: Chiamata per l'andamento live
+        const andamentoUrl = `http://www.viaggiatreno.it/infomobilita/vt_pax_internet/mobile/andamento?treno=${numeroTreno}&stazione=${codOrigine}`;
+        
+        const andamento = await axios.get(andamentoUrl);
+        res.json(andamento.data);
+
     } catch (error) {
-        res.status(500).json({ error: 'Errore server ferroviario', details: error.message });
+        console.error("Errore:", error.message);
+        res.status(500).json({ error: "Errore nel recupero dati live" });
     }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Proxy attivo sulla porta ${PORT}`));
+app.listen(PORT, () => console.log("Server Open-Proxy attivo"));
