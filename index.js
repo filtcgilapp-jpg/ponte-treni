@@ -1,42 +1,69 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const app = express();
 
+const app = express();
 app.use(cors());
 
+const VT = 'https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno';
+
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Referer': 'https://www.viaggiatreno.it/',
+  'Origin': 'https://www.viaggiatreno.it',
+};
+
+// ── ROUTE PRINCIPALE ──────────────────────────────────────────────────────────
+// Cerca il treno e restituisce i dati di andamento in un'unica chiamata.
+// Esempio: GET /treno/9604
+// ─────────────────────────────────────────────────────────────────────────────
 app.get('/treno/:numero', async (req, res) => {
-    try {
-        const numero = req.params.numero;
-        
-        // FASE 1: Troviamo l'ID del treno e la stazione di partenza
-        // Questo endpoint è solitamente più stabile e meno protetto
-        const cercaTrenoUrl = `http://www.viaggiatreno.it/infomobilita/vt_pax_internet/mobile/numero?lang=IT&treno=${numero}`;
-        
-        const infoTreno = await axios.get(cercaTrenoUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
+  const numero = req.params.numero;
 
-        // Se infoTreno.data è una stringa vuota o HTML, il treno non esiste o siamo bloccati
-        if (!infoTreno.data || typeof infoTreno.data === 'string') {
-            return res.status(404).json({ error: "Treno non trovato o server occupato" });
-        }
+  try {
+    // Step 1: ottieni codOrigine dal numero treno
+    const autoUrl = `${VT}/cercaNumeroTrenoTrenoAutocomplete/${numero}`;
+    const autoRes = await axios.get(autoUrl, { headers: HEADERS, timeout: 10000, responseType: 'text' });
+    const body1 = autoRes.data ? autoRes.data.toString().trim() : '';
 
-        // FASE 2: Recuperiamo il dettaglio (ID stazione e codice treno)
-        // L'oggetto restituito da ViaggiaTreno contiene codOrigine e numeroTreno
-        const { codOrigine, numeroTreno } = infoTreno.data;
-
-        // FASE 3: Chiamata per l'andamento live
-        const andamentoUrl = `http://www.viaggiatreno.it/infomobilita/vt_pax_internet/mobile/andamento?treno=${numeroTreno}&stazione=${codOrigine}`;
-        
-        const andamento = await axios.get(andamentoUrl);
-        res.json(andamento.data);
-
-    } catch (error) {
-        console.error("Errore:", error.message);
-        res.status(500).json({ error: "Errore nel recupero dati live" });
+    if (!body1) {
+      return res.status(404).json({ error: `Treno ${numero} non trovato.` });
     }
+
+    // Risposta: "Treno 9604 - MILANO CENTRALE|9604-S01700\n..."
+    const firstLine = body1.split('\n')[0];
+    const parts = firstLine.split('|');
+    if (parts.length < 2) {
+      return res.status(404).json({ error: `Treno ${numero} non trovato.` });
+    }
+
+    const token = parts[1].trim(); // "9604-S01700"
+    const dashIdx = token.indexOf('-');
+    if (dashIdx < 0) {
+      return res.status(404).json({ error: 'Codice origine non trovato.' });
+    }
+
+    const numeroTreno = token.substring(0, dashIdx);
+    const codOrigine = token.substring(dashIdx + 1);
+
+    // Step 2: dati andamento in tempo reale
+    const ts = Date.now();
+    const andamentoUrl = `${VT}/andamentoTreno/${codOrigine}/${numeroTreno}/${ts}`;
+    const andamentoRes = await axios.get(andamentoUrl, { headers: HEADERS, timeout: 10000 });
+
+    res.json(andamentoRes.data);
+
+  } catch (err) {
+    console.error(`[/treno/${numero}] Errore:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── HEALTH CHECK ─────────────────────────────────────────────────────────────
+app.get('/', (req, res) => {
+  res.send('VT Proxy OK');
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("Server Open-Proxy attivo"));
+app.listen(PORT, () => console.log(`Server attivo sulla porta ${PORT}`));
