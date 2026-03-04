@@ -14,31 +14,37 @@ const HEADERS = {
   'Origin': 'https://www.viaggiatreno.it',
 };
 
-// ── ROUTE PRINCIPALE ──────────────────────────────────────────────────────────
-// Cerca il treno e restituisce i dati di andamento in un'unica chiamata.
-// Esempio: GET /treno/9604
-// ─────────────────────────────────────────────────────────────────────────────
+// Health check
+app.get('/', (req, res) => res.send('VT Proxy OK'));
+
+// GET /treno/:numero
 app.get('/treno/:numero', async (req, res) => {
   const numero = req.params.numero;
 
   try {
-    // Step 1: ottieni codOrigine dal numero treno
+    // Step 1: autocomplete → codOrigine
     const autoUrl = `${VT}/cercaNumeroTrenoTrenoAutocomplete/${numero}`;
-    const autoRes = await axios.get(autoUrl, { headers: HEADERS, timeout: 10000, responseType: 'text' });
-    const body1 = autoRes.data ? autoRes.data.toString().trim() : '';
+    const autoRes = await axios.get(autoUrl, {
+      headers: HEADERS,
+      timeout: 12000,
+      responseType: 'text',
+    });
+
+    const body1 = (autoRes.data || '').toString().trim();
+    console.log(`[${numero}] Autocomplete: "${body1.split('\n')[0]}"`);
 
     if (!body1) {
       return res.status(404).json({ error: `Treno ${numero} non trovato.` });
     }
 
-    // Risposta: "Treno 9604 - MILANO CENTRALE|9604-S01700\n..."
+    // "Treno 9604 - MILANO CENTRALE|9604-S01700"
     const firstLine = body1.split('\n')[0];
     const parts = firstLine.split('|');
     if (parts.length < 2) {
       return res.status(404).json({ error: `Treno ${numero} non trovato.` });
     }
 
-    const token = parts[1].trim(); // "9604-S01700"
+    const token = parts[1].trim();
     const dashIdx = token.indexOf('-');
     if (dashIdx < 0) {
       return res.status(404).json({ error: 'Codice origine non trovato.' });
@@ -46,13 +52,40 @@ app.get('/treno/:numero', async (req, res) => {
 
     const numeroTreno = token.substring(0, dashIdx);
     const codOrigine = token.substring(dashIdx + 1);
+    console.log(`[${numero}] numeroTreno=${numeroTreno} codOrigine=${codOrigine}`);
 
-    // Step 2: dati andamento in tempo reale
+    // Step 2: andamento in tempo reale
     const ts = Date.now();
     const andamentoUrl = `${VT}/andamentoTreno/${codOrigine}/${numeroTreno}/${ts}`;
-    const andamentoRes = await axios.get(andamentoUrl, { headers: HEADERS, timeout: 10000 });
+    const andamentoRes = await axios.get(andamentoUrl, {
+      headers: HEADERS,
+      timeout: 12000,
+      responseType: 'text',
+    });
 
-    res.json(andamentoRes.data);
+    const body2 = (andamentoRes.data || '').toString().trim();
+    console.log(`[${numero}] Andamento (primi 120): "${body2.substring(0, 120)}"`);
+
+    if (!body2) {
+      return res.status(404).json({ error: `Dati non disponibili per il treno ${numero}.` });
+    }
+
+    // Prova a parsare come JSON
+    let parsed;
+    try {
+      parsed = JSON.parse(body2);
+    } catch (_) {
+      return res.status(404).json({
+        error: `Treno ${numero} non ancora attivo o dati non disponibili.`,
+        raw: body2.substring(0, 120),
+      });
+    }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return res.status(404).json({ error: `Dati non validi per il treno ${numero}.` });
+    }
+
+    res.json(parsed);
 
   } catch (err) {
     console.error(`[/treno/${numero}] Errore:`, err.message);
@@ -60,10 +93,5 @@ app.get('/treno/:numero', async (req, res) => {
   }
 });
 
-// ── HEALTH CHECK ─────────────────────────────────────────────────────────────
-app.get('/', (req, res) => {
-  res.send('VT Proxy OK');
-});
-
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Server attivo sulla porta ${PORT}`));
+app.listen(PORT, () => console.log(`VT Proxy attivo sulla porta ${PORT}`));
