@@ -14,13 +14,11 @@ const VT_HEADERS = {
   'Origin': 'https://www.viaggiatreno.it',
 };
 
-const SPORTS_KEY = '60d25b9d0e6e13236c74b711f521a318';
+// TheSportsDB free key — no registration, 30 req/min
+const SDB = 'https://www.thesportsdb.com/api/v1/json/123';
 
-const BROWSER_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'application/json, text/html, */*',
-  'Accept-Language': 'it-IT,it;q=0.9,en;q=0.8',
-};
+// Ergast F1 — completamente gratuito, nessuna key
+const ERGAST = 'https://ergast.com/api/f1';
 
 // ── CACHE ─────────────────────────────────────────────────────────────────────
 const cache = new Map();
@@ -34,20 +32,22 @@ function setCache(key, data, ttlMs) {
   cache.set(key, { data, expiresAt: Date.now() + ttlMs });
 }
 
-// ── HELPER GENERICO PER API-SPORTS ───────────────────────────────────────────
-async function sportsGet(host, path, params = {}, ttlMs = 5 * 60 * 1000) {
-  const qs = new URLSearchParams(params).toString();
-  const cacheKey = `${host}${path}?${qs}`;
-  const cached = getCache(cacheKey);
-  if (cached) { console.log(`[CACHE HIT] ${cacheKey}`); return cached; }
-  console.log(`[API CALL] https://${host}${path}`, params);
-  const res = await axios.get(`https://${host}${path}`, {
-    headers: { 'x-apisports-key': SPORTS_KEY },
-    params,
-    timeout: 10000,
-  });
-  setCache(cacheKey, res.data, ttlMs);
-  return res.data;
+async function sdbGet(path, ttlMs = 10 * 60 * 1000) {
+  const cached = getCache(path);
+  if (cached) { console.log(`[CACHE] ${path}`); return cached; }
+  console.log(`[SDB] ${SDB}${path}`);
+  const r = await axios.get(`${SDB}${path}`, { timeout: 12000 });
+  setCache(path, r.data, ttlMs);
+  return r.data;
+}
+
+async function ergastGet(path, ttlMs = 60 * 60 * 1000) {
+  const cached = getCache(`ergast:${path}`);
+  if (cached) return cached;
+  console.log(`[ERGAST] ${ERGAST}${path}`);
+  const r = await axios.get(`${ERGAST}${path}.json`, { timeout: 12000 });
+  setCache(`ergast:${path}`, r.data, ttlMs);
+  return r.data;
 }
 
 // ── HEALTH CHECK ──────────────────────────────────────────────────────────────
@@ -60,24 +60,19 @@ app.get('/treno/:numero', async (req, res) => {
   const numero = req.params.numero;
   try {
     const autoUrl = `${VT}/cercaNumeroTrenoTrenoAutocomplete/${numero}`;
-    const autoRes = await axios.get(autoUrl, {
-      headers: VT_HEADERS, timeout: 12000, responseType: 'text',
-    });
+    const autoRes = await axios.get(autoUrl, { headers: VT_HEADERS, timeout: 12000, responseType: 'text' });
     const body1 = (autoRes.data || '').toString().trim();
     console.log(`[${numero}] autocomplete: "${body1.split('\n')[0]}"`);
-    if (!body1 || !body1.includes('|')) {
+    if (!body1 || !body1.includes('|'))
       return res.status(404).json({ error: `Treno ${numero} non trovato.` });
-    }
     const firstLine = body1.split('\n')[0];
     const pipe = firstLine.indexOf('|');
-    if (pipe < 0) {
+    if (pipe < 0)
       return res.status(404).json({ error: `Treno ${numero} non trovato.` });
-    }
     const token = firstLine.substring(pipe + 1).trim();
     const parts = token.split('-');
-    if (parts.length < 2) {
+    if (parts.length < 2)
       return res.status(404).json({ error: 'Formato autocomplete non riconosciuto.' });
-    }
     const numeroTreno = parts[0];
     const codOrigine = parts[1];
     const dataPartenza = parts[2] || null;
@@ -85,28 +80,19 @@ app.get('/treno/:numero', async (req, res) => {
     const ts = dataPartenza || Date.now().toString();
     const andUrl = `${VT}/andamentoTreno/${codOrigine}/${numeroTreno}/${ts}`;
     console.log(`[${numero}] andUrl: ${andUrl}`);
-    const andRes = await axios.get(andUrl, {
-      headers: VT_HEADERS, timeout: 12000, responseType: 'text',
-    });
+    const andRes = await axios.get(andUrl, { headers: VT_HEADERS, timeout: 12000, responseType: 'text' });
     const body2 = (andRes.data || '').toString().trim();
     console.log(`[${numero}] andamento (200): "${body2.substring(0, 200)}"`);
-    if (!body2 || body2.startsWith('<') || body2.startsWith('\n<')) {
-      return res.status(404).json({
-        error: `Dati non disponibili per il treno ${numero}. Potrebbe non essere ancora partito.`,
-      });
-    }
+    if (!body2 || body2.startsWith('<') || body2.startsWith('\n<'))
+      return res.status(404).json({ error: `Dati non disponibili per il treno ${numero}. Potrebbe non essere ancora partito.` });
     let parsed;
-    try {
-      parsed = JSON.parse(body2);
-    } catch (e) {
-      console.error(`[${numero}] JSON parse error: ${e.message} | body: ${body2.substring(0, 200)}`);
-      return res.status(404).json({
-        error: `Treno ${numero} non ancora attivo o dati non disponibili.`,
-      });
+    try { parsed = JSON.parse(body2); }
+    catch (e) {
+      console.error(`[${numero}] JSON parse error: ${e.message}`);
+      return res.status(404).json({ error: `Treno ${numero} non ancora attivo o dati non disponibili.` });
     }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       return res.status(404).json({ error: `Dati non validi per il treno ${numero}.` });
-    }
     res.json(parsed);
   } catch (err) {
     console.error(`[/treno/${numero}] Errore:`, err.message);
@@ -115,234 +101,252 @@ app.get('/treno/:numero', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// FOOTBALL  (host: v3.football.api-sports.io)
+// SPORT — CERCA (usato da tutti gli sport)
 // ══════════════════════════════════════════════════════════════════════════════
-const FB = 'v3.football.api-sports.io';
 
-app.get('/sport/football/search/:name', async (req, res) => {
-  try { res.json(await sportsGet(FB, '/teams', { search: req.params.name }, 10 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+// Cerca squadra per nome (calcio, basket, ecc.)
+// GET /sport/search/team?q=juventus
+app.get('/sport/search/team', async (req, res) => {
+  try {
+    const q = encodeURIComponent(req.query.q || '');
+    res.json(await sdbGet(`/searchteams.php?t=${q}`, 15 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/sport/football/standing', async (req, res) => {
-  try { res.json(await sportsGet(FB, '/standings', { league: req.query.league, season: req.query.season }, 60 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/football/last/:teamId', async (req, res) => {
-  try { res.json(await sportsGet(FB, '/fixtures', { team: req.params.teamId, last: 1 }, 30 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/football/next/:teamId', async (req, res) => {
-  try { res.json(await sportsGet(FB, '/fixtures', { team: req.params.teamId, next: 5 }, 30 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/football/live/:teamId', async (req, res) => {
-  try { res.json(await sportsGet(FB, '/fixtures', { team: req.params.teamId, live: 'all' }, 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/football/leagues/:teamId', async (req, res) => {
-  try { res.json(await sportsGet(FB, '/leagues', { team: req.params.teamId, season: new Date().getFullYear() }, 24 * 60 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+// Cerca giocatore per nome (tennis, F1, ecc.)
+// GET /sport/search/player?q=sinner
+app.get('/sport/search/player', async (req, res) => {
+  try {
+    const q = encodeURIComponent(req.query.q || '');
+    res.json(await sdbGet(`/searchplayers.php?p=${q}`, 15 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// FORMULA 1  (host: v1.formula-1.api-sports.io)
+// SPORT — SQUADRA (calcio, basket)
 // ══════════════════════════════════════════════════════════════════════════════
-const F1 = 'v1.formula-1.api-sports.io';
 
+// Dettagli squadra
+// GET /sport/team/:id
+app.get('/sport/team/:id', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/lookupteam.php?id=${req.params.id}`, 24 * 60 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Ultime 5 partite di una squadra
+// GET /sport/team/:id/last
+app.get('/sport/team/:id/last', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/eventslast.php?id=${req.params.id}`, 30 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Prossime 5 partite di una squadra
+// GET /sport/team/:id/next
+app.get('/sport/team/:id/next', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/eventsnext.php?id=${req.params.id}`, 30 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Rosa della squadra
+// GET /sport/team/:id/players
+app.get('/sport/team/:id/players', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/lookup_all_players.php?id=${req.params.id}`, 24 * 60 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Leghe di una squadra
+// GET /sport/team/:id/leagues
+app.get('/sport/team/:id/leagues', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/lookupleague.php?id=${req.params.id}`, 24 * 60 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SPORT — LEGHE E CLASSIFICHE
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Classifica di una lega (stagione corrente)
+// GET /sport/league/:id/table
+app.get('/sport/league/:id/table', async (req, res) => {
+  try {
+    const season = req.query.season || new Date().getFullYear().toString();
+    res.json(await sdbGet(`/lookuptable.php?l=${req.params.id}&s=${season}`, 60 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Ultime partite di una lega
+// GET /sport/league/:id/last
+app.get('/sport/league/:id/last', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/eventspastleague.php?id=${req.params.id}`, 30 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Prossime partite di una lega
+// GET /sport/league/:id/next
+app.get('/sport/league/:id/next', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/eventsnextleague.php?id=${req.params.id}`, 30 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Tutte le squadre di una lega
+// GET /sport/league/:id/teams
+app.get('/sport/league/:id/teams', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/lookup_all_teams.php?id=${req.params.id}`, 24 * 60 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SPORT — GIOCATORE (tennis, F1, MotoGP)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Dettagli giocatore/pilota
+// GET /sport/player/:id
+app.get('/sport/player/:id', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/lookupplayer.php?id=${req.params.id}`, 24 * 60 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Ultime partite/gare di un giocatore
+// GET /sport/player/:id/last
+app.get('/sport/player/:id/last', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/eventslast.php?id=${req.params.id}`, 30 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Prossime partite/gare di un giocatore
+// GET /sport/player/:id/next
+app.get('/sport/player/:id/next', async (req, res) => {
+  try {
+    res.json(await sdbGet(`/eventsnext.php?id=${req.params.id}`, 30 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// F1 — tramite Ergast API (gratuita, nessuna key)
+// ID leghe TheSportsDB: F1 = 4370
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Calendario F1 stagione corrente
+// GET /sport/f1/calendar
+app.get('/sport/f1/calendar', async (req, res) => {
+  try {
+    const season = new Date().getFullYear();
+    const data = await ergastGet(`/${season}`);
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Classifica piloti F1 stagione corrente
+// GET /sport/f1/drivers
+app.get('/sport/f1/drivers', async (req, res) => {
+  try {
+    const season = new Date().getFullYear();
+    const data = await ergastGet(`/${season}/driverStandings`);
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Classifica costruttori F1
+// GET /sport/f1/constructors
+app.get('/sport/f1/constructors', async (req, res) => {
+  try {
+    const season = new Date().getFullYear();
+    const data = await ergastGet(`/${season}/constructorStandings`);
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Risultati ultima gara F1
+// GET /sport/f1/last
+app.get('/sport/f1/last', async (req, res) => {
+  try {
+    const data = await ergastGet('/current/last/results', 60 * 60 * 1000);
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Prossima gara F1 (con tutti i dettagli del weekend)
+// GET /sport/f1/next
 app.get('/sport/f1/next', async (req, res) => {
-  try { res.json(await sportsGet(F1, '/races', { season: new Date().getFullYear(), type: 'Race' }, 60 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/f1/drivers-standing', async (req, res) => {
-  try { res.json(await sportsGet(F1, '/rankings/drivers', { season: new Date().getFullYear() }, 60 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/f1/teams-standing', async (req, res) => {
-  try { res.json(await sportsGet(F1, '/rankings/teams', { season: new Date().getFullYear() }, 60 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// BASKETBALL  (host: v1.basketball.api-sports.io)
-// ══════════════════════════════════════════════════════════════════════════════
-const BB = 'v1.basketball.api-sports.io';
-
-app.get('/sport/basketball/live', async (req, res) => {
-  try { res.json(await sportsGet(BB, '/games', { live: 'all' }, 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/basketball/next', async (req, res) => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    res.json(await sportsGet(BB, '/games', { date: today }, 30 * 60 * 1000));
-  }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TENNIS  (host: v1.tennis.api-sports.io)
-// ══════════════════════════════════════════════════════════════════════════════
-const TN = 'v1.tennis.api-sports.io';
-
-app.get('/sport/tennis/live', async (req, res) => {
-  try { res.json(await sportsGet(TN, '/games', { live: 'all' }, 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/tennis/today', async (req, res) => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    res.json(await sportsGet(TN, '/games', { date: today }, 15 * 60 * 1000));
-  }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/tennis/ranking/atp', async (req, res) => {
-  try { res.json(await sportsGet(TN, '/rankings', { type: 'ATP' }, 24 * 60 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/sport/tennis/ranking/wta', async (req, res) => {
-  try { res.json(await sportsGet(TN, '/rankings', { type: 'WTA' }, 24 * 60 * 60 * 1000)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// MOTOGP — scraping da api.motogp.com (API pubblica non documentata)
-// ══════════════════════════════════════════════════════════════════════════════
-const MOTOGP_API = 'https://api.motogp.com/riders-api/season';
-
-// Calendario gare MotoGP stagione corrente
-app.get('/sport/motogp/calendar', async (req, res) => {
-  const cacheKey = 'motogp:calendar';
-  const cached = getCache(cacheKey);
-  if (cached) return res.json(cached);
-
   try {
     const season = new Date().getFullYear();
-    const url = `${MOTOGP_API}/${season}/events?category=MotoGP&is_published=true`;
-    console.log(`[MOTOGP] calendar: ${url}`);
-    const response = await axios.get(url, {
-      headers: BROWSER_HEADERS,
-      timeout: 12000,
-    });
-    const events = response.data;
-    if (!Array.isArray(events)) {
-      return res.status(404).json({ error: 'Calendario MotoGP non disponibile.' });
-    }
-    // Normalizza i dati
-    const result = events.map(e => ({
-      id: e.id,
-      name: e.name,
-      shortName: e.short_name,
-      country: e.country?.iso || '',
-      countryName: e.country?.name || '',
-      circuit: e.circuit?.name || '',
-      dateStart: e.date_start,
-      dateEnd: e.date_end,
-      status: e.status, // 'Upcoming', 'In Progress', 'Finished'
-    }));
-    setCache(cacheKey, result, 60 * 60 * 1000); // 1 ora
-    res.json(result);
-  } catch (err) {
-    console.error('[MOTOGP calendar]', err.message);
-    res.status(500).json({ error: 'Errore nel recupero del calendario MotoGP: ' + err.message });
-  }
-});
-
-// Classifica piloti MotoGP
-app.get('/sport/motogp/standing', async (req, res) => {
-  const cacheKey = 'motogp:standing';
-  const cached = getCache(cacheKey);
-  if (cached) return res.json(cached);
-
-  try {
-    const season = new Date().getFullYear();
-    // Prima otteniamo la lista delle categorie per trovare l'ID di MotoGP
-    const catUrl = `${MOTOGP_API}/${season}/categories`;
-    const catRes = await axios.get(catUrl, { headers: BROWSER_HEADERS, timeout: 10000 });
-    const categories = catRes.data;
-    const motoGPCat = Array.isArray(categories)
-      ? categories.find(c => c.name === 'MotoGP' || c.legacy_id === 3)
-      : null;
-
-    if (!motoGPCat) {
-      return res.status(404).json({ error: 'Categoria MotoGP non trovata.' });
-    }
-
-    const standUrl = `https://api.motogp.com/riders-api/season/${season}/standings?category=${motoGPCat.id}`;
-    console.log(`[MOTOGP] standings: ${standUrl}`);
-    const standRes = await axios.get(standUrl, { headers: BROWSER_HEADERS, timeout: 10000 });
-    const standings = standRes.data;
-
-    if (!standings || !Array.isArray(standings.classification)) {
-      return res.status(404).json({ error: 'Classifica MotoGP non disponibile.' });
-    }
-
-    const result = standings.classification.map(r => ({
-      position: r.position,
-      points: r.points,
-      rider: {
-        name: `${r.rider?.name || ''} ${r.rider?.surname || ''}`.trim(),
-        number: r.rider?.number || '',
-        nationality: r.rider?.country?.iso || '',
-        photo: r.rider?.pictures?.profile?.main || null,
-      },
-      team: r.team?.name || '',
-      constructor: r.constructor?.name || '',
-    }));
-
-    setCache(cacheKey, result, 60 * 60 * 1000); // 1 ora
-    res.json(result);
-  } catch (err) {
-    console.error('[MOTOGP standing]', err.message);
-    res.status(500).json({ error: 'Errore nel recupero della classifica MotoGP: ' + err.message });
-  }
-});
-
-// Prossimo GP (primo evento con status Upcoming)
-app.get('/sport/motogp/next', async (req, res) => {
-  const cacheKey = 'motogp:next';
-  const cached = getCache(cacheKey);
-  if (cached) return res.json(cached);
-
-  try {
-    const season = new Date().getFullYear();
-    const url = `${MOTOGP_API}/${season}/events?category=MotoGP&is_published=true`;
-    const response = await axios.get(url, { headers: BROWSER_HEADERS, timeout: 12000 });
-    const events = response.data;
-    if (!Array.isArray(events)) {
-      return res.status(404).json({ error: 'Nessun evento trovato.' });
-    }
+    // Prendi tutto il calendario e trova la prossima gara
+    const data = await ergastGet(`/${season}`, 60 * 60 * 1000);
+    const races = data?.MRData?.RaceTable?.Races || [];
     const now = new Date();
-    const next = events.find(e => new Date(e.date_end) >= now);
-    if (!next) return res.status(404).json({ error: 'Nessun prossimo GP trovato.' });
+    const next = races.find(r => new Date(r.date + 'T' + (r.time || '12:00:00Z')) > now);
+    res.json({ MRData: { RaceTable: { Races: next ? [next] : [] } } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
-    const result = {
-      id: next.id,
-      name: next.name,
-      shortName: next.short_name,
-      country: next.country?.iso || '',
-      countryName: next.country?.name || '',
-      circuit: next.circuit?.name || '',
-      dateStart: next.date_start,
-      dateEnd: next.date_end,
-      status: next.status,
-    };
-    setCache(cacheKey, result, 30 * 60 * 1000); // 30 min
-    res.json(result);
-  } catch (err) {
-    console.error('[MOTOGP next]', err.message);
-    res.status(500).json({ error: 'Errore: ' + err.message });
-  }
+// Cerca pilota F1 per nome (via TheSportsDB)
+// GET /sport/f1/search?q=hamilton
+app.get('/sport/f1/search', async (req, res) => {
+  try {
+    const q = encodeURIComponent(req.query.q || '');
+    // Cerca tra giocatori nel team F1
+    res.json(await sdbGet(`/searchplayers.php?p=${q}&t=Formula+1`, 15 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MOTOGP — TheSportsDB (league id: 4399) + API motogp.com come fallback
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Calendario MotoGP (TheSportsDB lega id 4399)
+// GET /sport/motogp/calendar
+app.get('/sport/motogp/calendar', async (req, res) => {
+  try {
+    // Prossimi eventi della lega MotoGP
+    const next = await sdbGet('/eventsnextleague.php?id=4399', 60 * 60 * 1000);
+    const past = await sdbGet('/eventspastleague.php?id=4399', 60 * 60 * 1000);
+    res.json({ next: next?.events || [], past: past?.events || [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Classifica MotoGP (stagione via TheSportsDB)
+// GET /sport/motogp/table
+app.get('/sport/motogp/table', async (req, res) => {
+  try {
+    const season = req.query.season || new Date().getFullYear().toString();
+    res.json(await sdbGet(`/lookuptable.php?l=4399&s=${season}`, 60 * 60 * 1000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LEGHE PREDEFINITE (ID TheSportsDB)
+// ══════════════════════════════════════════════════════════════════════════════
+// Utile per la UI — restituisce ID noti delle principali leghe
+app.get('/sport/leagues/main', (req, res) => {
+  res.json({
+    football: [
+      { id: '4335', name: 'Serie A', country: 'Italy' },
+      { id: '4328', name: 'Premier League', country: 'England' },
+      { id: '4331', name: 'La Liga', country: 'Spain' },
+      { id: '4332', name: 'Bundesliga', country: 'Germany' },
+      { id: '4334', name: 'Ligue 1', country: 'France' },
+      { id: '4480', name: 'Champions League', country: 'Europe' },
+    ],
+    basketball: [
+      { id: '4387', name: 'NBA', country: 'USA' },
+      { id: '4422', name: 'Euroleague', country: 'Europe' },
+      { id: '4421', name: 'Serie A Basket', country: 'Italy' },
+    ],
+    tennis: [
+      { id: '4289', name: 'ATP Tour', country: 'World' },
+      { id: '4290', name: 'WTA Tour', country: 'World' },
+    ],
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
