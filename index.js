@@ -94,7 +94,13 @@ app.get('/treno/:numero', async (req, res) => {
       return res.status(404).json({ error: `Dati non validi per il treno ${numero}.` });
     }
 
-    res.json(parsed);
+    // Debug: logga i campi della prima fermata per capire i nomi esatti
+  if (parsed.fermate && parsed.fermate.length > 0) {
+    console.log('[DEBUG] Prima fermata keys:', JSON.stringify(Object.keys(parsed.fermate[0])));
+    console.log('[DEBUG] Prima fermata:', JSON.stringify(parsed.fermate[0]));
+  }
+
+  res.json(parsed);
 
   } catch (err) {
     console.error(`[/treno/${numero}] Errore:`, err.message);
