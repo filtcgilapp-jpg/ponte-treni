@@ -42,16 +42,16 @@ const SOCCER_LEAGUES=[
   {slug:'uefa.europa',     name:'Europa League'},
 ];
 
-// ─── NORMALIZZA EVENTO ESPN ───────────────────────────────────────────────────
-// score può essere: numero, stringa, oppure oggetto {value:N} (nel /schedule)
+// ─── score può essere numero, stringa o oggetto {value:N} ─────────────────────
 function parseScore(s){
-  if(s==null)return '';
-  if(typeof s==='object'&&s.value!=null)return String(s.value);
+  if(s==null)return'';
+  if(typeof s==='object'&&s.value!=null)return String(Math.round(Number(s.value)));
   const n=Number(s);
-  if(!isNaN(n))return String(Math.round(n));
-  return String(s);
+  if(!isNaN(n)&&String(s).trim()!=='')return String(Math.round(n));
+  return'';
 }
 
+// ─── Normalizza evento ESPN ───────────────────────────────────────────────────
 function normEvent(e,leagueName,leagueSlug){
   try{
     if(!e||typeof e!=='object'||e.$ref)return null;
@@ -65,24 +65,41 @@ function normEvent(e,leagueName,leagueSlug){
     const aName=away.team?.shortDisplayName||away.team?.displayName||'';
     if(!hName&&!aName)return null;
     const st=comp.status?.type||{};
-    const hScore=parseScore(home.score);
-    const aScore=parseScore(away.score);
+    const completed=!!st.completed;
+    const hScore=completed?parseScore(home.score):'';
+    const aScore=completed?parseScore(away.score):'';
+    // Fase/round da ESPN notes o week
+    const round=comp.notes?.[0]?.headline||comp.type?.text||
+                (e.week?.number?`Giornata ${e.week.number}`:'');
     return{
-      id:      String(e.id||''),
-      date:    e.date||'',
-      league:  leagueName||e.league?.name||e.season?.type?.name||'',
+      id:String(e.id||''),date:e.date||'',
+      league:leagueName||e.league?.name||'',
       leagueSlug:leagueSlug||e.league?.slug||'',
-      homeName:hName,
-      awayName:aName,
-      homeScore:hScore,
-      awayScore:aScore,
-      homeId:  String(home.team?.id||''),
-      awayId:  String(away.team?.id||''),
-      completed:!!st.completed,
-      live:    st.name==='STATUS_IN_PROGRESS',
-      clock:   comp.status?.displayClock||'',
+      homeName:hName,awayName:aName,
+      homeScore:hScore,awayScore:aScore,
+      homeId:String(home.team?.id||''),awayId:String(away.team?.id||''),
+      completed,live:st.name==='STATUS_IN_PROGRESS',
+      clock:comp.status?.displayClock||'',round,
     };
   }catch{return null;}
+}
+
+// ─── Mappa nomi fase coppa inglese→italiano ───────────────────────────────────
+function mapPhase(raw){
+  if(!raw)return'';
+  const r=raw.toLowerCase().trim();
+  if(r.includes('semifinal')||r.includes('semi-final'))return'Semifinale';
+  if(r.includes('quarterfinal')||r.includes('quarter-final')||r.includes('round of 8'))return'Quarti di Finale';
+  if(r.includes('round of 16')||r.includes('ottavi'))return'Ottavi di Finale';
+  if(r.includes('round of 32')||r.includes('sedicesimi'))return'Sedicesimi';
+  if(r.includes('round of 64')||r.includes('trentaduesimi'))return'Trentaduesimi';
+  if((r.includes('final')&&!r.includes('semi')&&!r.includes('quarter')&&!r.includes('round')))return'Finale';
+  if(r.includes('group')||r.includes('gruppo')||r.includes('girone'))return'Fase a Gironi';
+  if(r.includes('playoff')||r.includes('play-off'))return'Playoff';
+  if(r.includes('1st leg'))return'Andata';
+  if(r.includes('2nd leg'))return'Ritorno';
+  if(r.match(/giornata\s*\d/i)||r.match(/round\s*\d/i)||r.match(/matchday/i))return raw;
+  return raw;
 }
 
 // ── HEALTH ────────────────────────────────────────────────────────────────────
@@ -96,7 +113,6 @@ app.get('/img',async(req,res)=>{
   }catch{res.status(404).send('Not found');}
 });
 
-// ── OG ────────────────────────────────────────────────────────────────────────
 app.get('/og',async(req,res)=>{
   const url=req.query.url;if(!url)return res.status(400).json({error:'Missing url'});
   const ck=`og:${url}`;const cached=getC(ck);if(cached)return res.json(cached);
@@ -114,7 +130,6 @@ app.get('/og',async(req,res)=>{
   }catch(err){res.status(500).json({error:err.message});}
 });
 
-// ── NEWS ──────────────────────────────────────────────────────────────────────
 app.get('/news',async(req,res)=>{
   let query=req.query.q||'';
   if(!query&&req.query.tags)query=req.query.tags.split(',').map(t=>t.trim()).filter(Boolean).join(' OR ');
@@ -132,12 +147,11 @@ app.get('/news',async(req,res)=>{
       const rawTitle=getTag('title')||'';const srcM=rawTitle.match(/^(.*?)\s+-\s+([^-]+)$/);
       items.push({title:srcM?srcM[1].trim():rawTitle,source:srcM?srcM[2].trim():(getTag('source')||''),description:(getTag('description')||'').replace(/&lt;.*?&gt;/g,'').substring(0,200),url:linkM?linkM[1]:null,image:imgM?imgM[1]:null,pubDate:getTag('pubDate')?new Date(getTag('pubDate')).toISOString():new Date().toISOString()});
     }
-    const result={query,items,fetchedAt:new Date().toISOString()};
-    setC(ck,result,1800000);res.json(result);
+    setC(ck,{query,items,fetchedAt:new Date().toISOString()},1800000);
+    res.json({query,items,fetchedAt:new Date().toISOString()});
   }catch(err){res.status(500).json({error:err.message});}
 });
 
-// ── TRENI ─────────────────────────────────────────────────────────────────────
 app.get('/treno/:numero',async(req,res)=>{
   try{
     const n=req.params.numero;
@@ -156,6 +170,8 @@ app.get('/treno/:numero',async(req,res)=>{
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CALCIO
+// Partite passate: ESPN /teams/:id/schedule (stagione corrente)
+// Partite future:  ESPN /scoreboard?dates=OGGI-+90gg filtrato per teamId
 // ══════════════════════════════════════════════════════════════════════════════
 app.get('/sport/soccer/search',async(req,res)=>{
   try{
@@ -181,74 +197,41 @@ app.get('/sport/soccer/search',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// Partite squadra: schedule ESPN (passate+future) + scoreboard corrente
 app.get('/sport/soccer/team/:id/events',async(req,res)=>{
   try{
     const id=req.params.id;
-    const name=req.query.name||'';
     const allEvents=[];
     const seen=new Set();
 
+    // ── PASSATE: schedule stagione corrente per ogni lega ──────────────────
     await Promise.all(SOCCER_LEAGUES.map(async(lg)=>{
-      // 1) schedule — contiene tutta la stagione passata+futura
       try{
         const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/schedule`,3600000);
         for(const e of(d?.events||[])){
-          if(!e||e.$ref||typeof e!=='object')continue;
+          if(!e||e.$ref)continue;
           const ne=normEvent(e,lg.name,lg.slug);
-          if(!ne||seen.has(ne.id))continue;
+          if(!ne||!ne.completed||seen.has(ne.id))continue;
           seen.add(ne.id);allEvents.push(ne);
-        }
-      }catch{}
-
-      // 2) scoreboard corrente — sovrascrive con dati live/recenti
-      try{
-        const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard`,60000);
-        for(const e of(d?.events||[])){
-          const ne=normEvent(e,lg.name,lg.slug);
-          if(!ne)continue;
-          if(ne.homeId!==id&&ne.awayId!==id)continue;
-          if(!seen.has(ne.id)){seen.add(ne.id);allEvents.push(ne);}
-          else{
-            // aggiorna score con dato live
-            const idx=allEvents.findIndex(x=>x.id===ne.id);
-            if(idx>=0)allEvents[idx]=ne;
-          }
         }
       }catch{}
     }));
 
-    // Fallback TheSportsDB se pochi dati
-    if(allEvents.length<3&&name){
+    // ── FUTURE: scoreboard ESPN con range date (CONFERMATO: 69 eventi) ─────
+    // Range: oggi + 90 giorni, per ogni lega
+    const now=new Date();
+    const from=now.toISOString().slice(0,10).replace(/-/g,'');
+    const to=new Date(now.getTime()+90*864e5).toISOString().slice(0,10).replace(/-/g,'');
+    await Promise.all(SOCCER_LEAGUES.map(async(lg)=>{
       try{
-        const sd=await sdb(`/searchteams.php?t=${encodeURIComponent(name)}`,3600000);
-        const teams=(sd?.teams||[]).filter(t=>['soccer','football'].includes((t.strSport||'').toLowerCase()));
-        if(teams.length>0){
-          const tid=teams[0].idTeam;
-          const y=new Date().getFullYear();
-          for(const s of[`${y-1}-${y}`,`${y}-${y+1}`,`${y}`]){
-            const ev=await sdb(`/eventsseason.php?id=${tid}&s=${s}`,7200000).catch(()=>null);
-            if((ev?.events||[]).length>0){
-              for(const e of ev.events){
-                if(seen.has(String(e.idEvent)))continue;
-                seen.add(String(e.idEvent));
-                allEvents.push({
-                  id:String(e.idEvent),
-                  date:(e.dateEvent||'')+'T'+(e.strTime||'00:00:00'),
-                  league:e.strLeague||'',leagueSlug:'',
-                  homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
-                  homeScore:e.intHomeScore!=null?String(e.intHomeScore):'',
-                  awayScore:e.intAwayScore!=null?String(e.intAwayScore):'',
-                  homeId:'',awayId:'',
-                  completed:e.intHomeScore!=null,live:false,clock:'',
-                });
-              }
-              break;
-            }
-          }
+        const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${from}-${to}`,300000);
+        for(const e of(d?.events||[])){
+          const ne=normEvent(e,lg.name,lg.slug);
+          if(!ne||seen.has(ne.id))continue;
+          if(ne.homeId!==id&&ne.awayId!==id)continue;
+          seen.add(ne.id);allEvents.push(ne);
         }
       }catch{}
-    }
+    }));
 
     allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
     res.json({events:allEvents});
@@ -275,13 +258,11 @@ app.get('/sport/soccer/team/:id/leagues',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// Classifica — ESPN standings + fallback TheSportsDB
-// Le coppe (Coppa Italia, Europa) non hanno classifica a gironi → restituisce []
+// Classifica
 app.get('/sport/soccer/:league/standings',async(req,res)=>{
   try{
     const slug=req.params.league;
     const year=new Date().getFullYear();
-
     for(const y of[year,year-1]){
       for(const url of[
         `${ESPN2}/soccer/${slug}/standings?season=${y}`,
@@ -293,33 +274,26 @@ app.get('/sport/soccer/:league/standings',async(req,res)=>{
           for(const g of(d.children||[])){entries.push(...(g.standings?.entries||[]));}
           if(!entries.length)entries=d.standings?.entries||[];
           if(entries.length>0){
-            const rows=entries.map((e,i)=>{
+            return res.json({standings:entries.map((e,i)=>{
               const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
               return{
-                rank:   Math.round(stats['rank']||i+1),
-                name:   e.team?.displayName||'',
-                shortName:e.team?.shortDisplayName||e.team?.displayName||'',
-                teamId: String(e.team?.id||''),
-                played: Math.round(stats['gamesPlayed']||0),
-                wins:   Math.round(stats['wins']||0),
-                draws:  Math.round(stats['ties']||stats['draws']||0),
-                losses: Math.round(stats['losses']||0),
-                points: Math.round(stats['points']||0),
-                gd:     Math.round(stats['pointDifferential']||0),
+                rank:Math.round(stats['rank']||i+1),
+                name:e.team?.displayName||'',shortName:e.team?.shortDisplayName||e.team?.displayName||'',
+                teamId:String(e.team?.id||''),
+                played:Math.round(stats['gamesPlayed']||0),wins:Math.round(stats['wins']||0),
+                draws:Math.round(stats['ties']||stats['draws']||0),losses:Math.round(stats['losses']||0),
+                points:Math.round(stats['points']||0),gd:Math.round(stats['pointDifferential']||0),
               };
-            });
-            return res.json({standings:rows});
+            })});
           }
         }catch{}
       }
     }
-
-    // Fallback TheSportsDB per leghe principali
+    // Fallback TheSportsDB
     const sdbMap={'ita.1':'4335','esp.1':'4332','eng.1':'4328','ger.1':'4331','fra.1':'4334','uefa.champions':'4480'};
     const lid=sdbMap[slug];
     if(lid){
-      const y=new Date().getFullYear();
-      for(const s of[`${y-1}-${y}`,`${y}`]){
+      for(const s of[`${year-1}-${year}`,`${year}`]){
         const d=await sdb(`/lookuptable.php?l=${lid}&s=${s}`,3600000).catch(()=>null);
         if(d?.table?.length>0){
           return res.json({standings:d.table.map(r=>({
@@ -334,42 +308,40 @@ app.get('/sport/soccer/:league/standings',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// Fasi/Tabellone coppa — raggruppa eventi per round/fase
-// Usato per Coppa Italia, Europa League, Champions League gruppi+eliminazione
+// Fasi coppa — scoreboard con range date + schedule, raggruppati per fase
 app.get('/sport/soccer/:league/phases',async(req,res)=>{
   try{
     const slug=req.params.league;
     const teamId=req.query.teamId||'';
-    const year=new Date().getFullYear();
     const allEvents=[];
     const seen=new Set();
 
-    // Prendi schedule della squadra (o scoreboard se no teamId)
+    // Schedule (partite giocate)
     if(teamId){
       try{
         const d=await fetch(`${ESPN}/soccer/${slug}/teams/${teamId}/schedule`,3600000);
         for(const e of(d?.events||[])){
           if(!e||e.$ref)continue;
           const ne=normEvent(e,slug,slug);if(!ne||seen.has(ne.id))continue;
-          // Estrai nome fase dal competition
           const comp=(e.competitions||[])[0]||{};
-          ne.round=comp.notes?.[0]?.headline||comp.type?.text||e.week?.text||'';
+          ne.round=mapPhase(comp.notes?.[0]?.headline||comp.type?.text||'');
           seen.add(ne.id);allEvents.push(ne);
         }
       }catch{}
     }
 
-    // Anche scoreboard per eventi recenti/live
+    // Scoreboard future
+    const now=new Date();
+    const from=now.toISOString().slice(0,10).replace(/-/g,'');
+    const to=new Date(now.getTime()+180*864e5).toISOString().slice(0,10).replace(/-/g,'');
     try{
-      const d=await fetch(`${ESPN}/soccer/${slug}/scoreboard`,60000);
+      const d=await fetch(`${ESPN}/soccer/${slug}/scoreboard?dates=${from}-${to}`,300000);
       for(const e of(d?.events||[])){
-        if(!e)continue;
         const ne=normEvent(e,slug,slug);if(!ne)continue;
         if(teamId&&ne.homeId!==teamId&&ne.awayId!==teamId)continue;
         const comp=(e.competitions||[])[0]||{};
-        ne.round=comp.notes?.[0]?.headline||comp.type?.text||e.week?.text||'';
+        ne.round=mapPhase(comp.notes?.[0]?.headline||comp.type?.text||'');
         if(!seen.has(ne.id)){seen.add(ne.id);allEvents.push(ne);}
-        else{const idx=allEvents.findIndex(x=>x.id===ne.id);if(idx>=0)allEvents[idx]=ne;}
       }
     }catch{}
 
@@ -378,22 +350,12 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
     // Raggruppa per fase
     const phaseMap=new Map();
     for(const e of allEvents){
-      const ph=e.round||'Altro';
+      const ph=e.round||'Coppa Italia';
       if(!phaseMap.has(ph))phaseMap.set(ph,[]);
       phaseMap.get(ph).push(e);
     }
 
-    // Ordine fasi: Prima gironi, poi eliminazione diretta
-    const phaseOrder=['Gruppo','Gironi','Round of 32','Round of 16','Ottavi','Quarti','Semifinal','Finale','Final'];
-    const phases=[...phaseMap.entries()]
-      .sort((a,b)=>{
-        const dateA=new Date(a[1][0]?.date||'2000');
-        const dateB=new Date(b[1][0]?.date||'2000');
-        return dateA-dateB;
-      })
-      .map(([name,events])=>({name,events}));
-
-    // Prova anche standings (per gironi Champions/Europa)
+    // Standings (gironi se presenti)
     let standings=[];
     try{
       const yr=new Date().getFullYear();
@@ -418,10 +380,12 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
       }
     }catch{}
 
+    const phases=[...phaseMap.entries()].map(([name,events])=>({name,events}));
     res.json({phases,standings});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+// Live
 app.get('/sport/soccer/:league/live',async(req,res)=>{
   try{
     const d=await fetch(`${ESPN}/soccer/${req.params.league}/scoreboard`,30000);
@@ -429,42 +393,48 @@ app.get('/sport/soccer/:league/live',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// Rosa — ESPN roster (più completo di TheSportsDB)
+// Rosa — ESPN roster (rosa completa) con fallback TheSportsDB
 app.get('/sport/soccer/team/:id/roster',async(req,res)=>{
   try{
     const id=req.params.id;
-    const name=req.query.name||'';
+    const name=(req.query.name||'').trim();
 
-    // Prova ESPN prima — più aggiornato
-    try{
-      // Cerca in quale lega è la squadra
-      for(const lg of SOCCER_LEAGUES){
-        try{
-          const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/roster`,86400000);
-          const athletes=d?.athletes||[];
-          if(athletes.length>0){
-            const players=athletes.flatMap(group=>(group.items||[]).map(p=>({
+    // ESPN roster — fonte più completa e aggiornata
+    for(const lg of SOCCER_LEAGUES){
+      try{
+        const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/roster`,86400000);
+        const athletes=d?.athletes||[];
+        if(athletes.length>0){
+          const players=athletes.flatMap(group=>{
+            const pos=group.position||group.displayName||'';
+            return(group.items||[]).map(p=>({
               idPlayer:String(p.id),
               strPlayer:p.displayName||p.fullName||'',
-              strPosition:p.position?.name||p.position?.abbreviation||group.position||'',
+              strPosition:p.position?.name||p.position?.abbreviation||pos||'',
               strNationality:p.citizenship||p.birthPlace?.country||'',
-              strNumber:p.jersey||'',
+              strNumber:String(p.jersey||''),
               strThumb:p.headshot?.href||'',
-            })));
-            if(players.length>0)return res.json({player:players});
-          }
-        }catch{}
-      }
-    }catch{}
+            }));
+          });
+          if(players.length>5)return res.json({player:players});
+        }
+      }catch{}
+    }
 
-    // Fallback TheSportsDB
-    if(name){
-      const sd=await sdb(`/searchteams.php?t=${encodeURIComponent(name)}`,3600000);
-      const teams=(sd?.teams||[]).filter(t=>['soccer','football'].includes((t.strSport||'').toLowerCase()));
-      if(teams.length>0){
-        const p=await sdb(`/lookup_all_players.php?id=${teams[0].idTeam}`,86400000);
-        return res.json({player:p?.player||[]});
-      }
+    // Fallback TheSportsDB con varianti nome
+    const variants=[name,'Inter','Internazionale','Inter Milan','AC Milan','Milan']
+      .filter(v=>v&&name.toLowerCase().includes(v.toLowerCase().split(' ')[0]));
+    const searchNames=[name,...new Set(variants)].filter(Boolean).slice(0,4);
+
+    for(const variant of searchNames){
+      try{
+        const sd=await sdb(`/searchteams.php?t=${encodeURIComponent(variant)}`,3600000);
+        const teams=(sd?.teams||[]).filter(t=>['soccer','football'].includes((t.strSport||'').toLowerCase()));
+        if(teams.length>0){
+          const p=await sdb(`/lookup_all_players.php?id=${teams[0].idTeam}`,86400000);
+          if((p?.player||[]).length>5)return res.json({player:p.player});
+        }
+      }catch{}
     }
     res.json({player:[]});
   }catch(e){res.status(500).json({error:e.message});}
@@ -501,23 +471,25 @@ app.get('/sport/basketball/team/:league/:id/events',async(req,res)=>{
   try{
     const{league,id}=req.params;
     const allEvents=[];const seen=new Set();
-    // Schedule
+    // Passate
     try{
       const d=await fetch(`${ESPN}/basketball/${league}/teams/${id}/schedule`,3600000);
       for(const e of(d?.events||[])){
         if(!e||e.$ref)continue;
-        const ne=normEvent(e,league,league);if(!ne||seen.has(ne.id))continue;
+        const ne=normEvent(e,league,league);if(!ne||!ne.completed||seen.has(ne.id))continue;
         seen.add(ne.id);allEvents.push(ne);
       }
     }catch{}
-    // Scoreboard
+    // Future via scoreboard con date range
+    const now=new Date();
+    const from=now.toISOString().slice(0,10).replace(/-/g,'');
+    const to=new Date(now.getTime()+90*864e5).toISOString().slice(0,10).replace(/-/g,'');
     try{
-      const d=await fetch(`${ESPN}/basketball/${league}/scoreboard`,60000);
+      const d=await fetch(`${ESPN}/basketball/${league}/scoreboard?dates=${from}-${to}`,300000);
       for(const e of(d?.events||[])){
-        const ne=normEvent(e,league,league);if(!ne)continue;
+        const ne=normEvent(e,league,league);if(!ne||seen.has(ne.id))continue;
         if(ne.homeId!==id&&ne.awayId!==id)continue;
-        if(!seen.has(ne.id)){seen.add(ne.id);allEvents.push(ne);}
-        else{const idx=allEvents.findIndex(x=>x.id===ne.id);if(idx>=0)allEvents[idx]=ne;}
+        seen.add(ne.id);allEvents.push(ne);
       }
     }catch{}
     allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
@@ -531,11 +503,10 @@ app.get('/sport/basketball/:league/standings',async(req,res)=>{
     let entries=[];
     for(const g of(d.children||[])){entries.push(...(g.standings?.entries||[]));}
     if(!entries.length)entries=d.standings?.entries||[];
-    const rows=entries.map((e,i)=>{
+    res.json({standings:entries.map((e,i)=>{
       const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
       return{rank:i+1,name:e.team?.displayName||'',shortName:e.team?.shortDisplayName||'',teamId:String(e.team?.id||''),wins:Math.round(stats['wins']||0),losses:Math.round(stats['losses']||0)};
-    });
-    res.json({standings:rows});
+    })});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -548,12 +519,13 @@ app.get('/sport/basketball/:league/live',async(req,res)=>{
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TENNIS
+// ID confermati: Jannik Sinner = 34208213, Martin Sinner = 34204632
+// TheSportsDB /eventslast → {results:[]} /eventsnext → {events:[]}
 // ══════════════════════════════════════════════════════════════════════════════
 app.get('/sport/tennis/search',async(req,res)=>{
   try{
     const q=req.query.q||'';
     const d=await sdb(`/searchplayers.php?p=${encodeURIComponent(q)}`,900000);
-    // TheSportsDB restituisce 'player' non 'players'
     const all=d?.player||d?.players||[];
     res.json({players:all.filter(p=>(p.strSport||'').toLowerCase()==='tennis')});
   }catch(e){res.status(500).json({error:e.message});}
@@ -566,13 +538,31 @@ app.get('/sport/tennis/player/:id/events',async(req,res)=>{
       sdb(`/eventslast.php?id=${id}`,1800000).catch(()=>null),
       sdb(`/eventsnext.php?id=${id}`,1800000).catch(()=>null),
     ]);
-    // eventslast → results, eventsnext → events
+    // eventslast → results[], eventsnext → events[]
     const toArr=d=>{
       if(!d)return[];
       const v=d.results||d.events||d.event||[];
       return Array.isArray(v)?v:[];
     };
-    res.json({past:toArr(last),upcoming:toArr(next)});
+    const past=toArr(last);
+    const upcoming=toArr(next);
+
+    // Se vuoti, prova con i tornei TheSportsDB per il giocatore
+    if(past.length===0&&upcoming.length===0){
+      try{
+        // Cerca eventi per team/player tramite lookupplayer + eventsseason
+        const info=await sdb(`/lookupplayer.php?id=${id}`,86400000).catch(()=>null);
+        const teamId=info?.players?.[0]?.idTeam;
+        if(teamId){
+          const[tl,tn]=await Promise.all([
+            sdb(`/eventslast.php?id=${teamId}`,1800000).catch(()=>null),
+            sdb(`/eventsnext.php?id=${teamId}`,1800000).catch(()=>null),
+          ]);
+          return res.json({past:toArr(tl),upcoming:toArr(tn)});
+        }
+      }catch{}
+    }
+    res.json({past,upcoming});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -583,13 +573,11 @@ app.get('/sport/tennis/player/:id/info',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// Ranking ATP/WTA
+// Ranking ATP/WTA — ESPN web API
 app.get('/sport/tennis/ranking/:type',async(req,res)=>{
   try{
     const isWTA=req.params.type==='wta';
     const tour=isWTA?'wta':'atp';
-
-    // ESPN web API rankings
     for(const url of[
       `${ESPN2}/tennis/${tour}/rankings`,
       `${ESPN}/tennis/${tour}/rankings`,
@@ -599,23 +587,13 @@ app.get('/sport/tennis/ranking/:type',async(req,res)=>{
         const entries=d?.rankings?.[0]?.entries||d?.entries||[];
         if(entries.length>0){
           return res.json({ranking:entries.slice(0,100).map((e,i)=>({
-            rank:   e.currentRanking||e.ranking||i+1,
-            name:   e.athlete?.displayName||e.player?.displayName||e.team?.displayName||'',
+            rank:e.currentRanking||e.ranking||i+1,
+            name:e.athlete?.displayName||e.player?.displayName||e.team?.displayName||'',
             country:e.athlete?.flag?.alt||e.athlete?.country?.abbreviation||'',
-            points: e.rankingPoints||e.points||0,
+            points:e.rankingPoints||e.points||0,
           }))});
         }
       }catch{}
-    }
-
-    // Fallback TheSportsDB
-    const lid=isWTA?'4290':'4289';
-    const y=new Date().getFullYear();
-    for(const s of[`${y}`,`${y-1}`]){
-      const d=await sdb(`/lookuptable.php?l=${lid}&s=${s}`,86400000).catch(()=>null);
-      if(d?.table?.length>0){
-        return res.json({ranking:d.table.map(r=>({rank:+r.intRank,name:r.strTeam,country:'',points:+r.intPoints||0}))});
-      }
     }
     res.json({ranking:[]});
   }catch(e){res.status(500).json({error:e.message});}
@@ -652,37 +630,55 @@ app.get('/sport/f1/last',async(req,res)=>{
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MOTOGP
+// TheSportsDB ha pochissimi dati (1-2 eventi).
+// Usiamo Ergast-style API jolpi.ca per MotoGP se disponibile,
+// altrimenti ESPN racing/motogp + TheSportsDB come supplemento
 // ══════════════════════════════════════════════════════════════════════════════
 app.get('/sport/motogp/calendar',async(req,res)=>{
   try{
-    // TheSportsDB — lega MotoGP id=4407
-    const[p,n]=await Promise.all([
-      sdb('/eventspastleague.php?id=4407',1800000).catch(()=>null),
-      sdb('/eventsnextleague.php?id=4407',1800000).catch(()=>null),
-    ]);
-    let past=(p?.events||[]);
-    let upcoming=(n?.events||[]);
+    const past=[];const upcoming=[];const seen=new Set();
+    const now=new Date();
 
-    // Se TheSportsDB vuoto, prova ESPN MotoGP
-    if(past.length+upcoming.length<3){
-      try{
-        const espn=await fetch(`${ESPN}/racing/motogp/scoreboard`,120000);
-        const now=new Date();
-        for(const e of(espn?.events||[])){
-          const d=e.date?new Date(e.date):null;
-          const ev={
-            idEvent:String(e.id||''),
-            strEvent:e.name||e.shortName||'',
-            strLeague:'MotoGP',
-            dateEvent:e.date?e.date.split('T')[0]:'',
-            strTime:e.date?e.date.split('T')[1]:'',
-            strVenue:e.venues?.[0]?.fullName||'',
-          };
-          if(d&&d<now)past.push(ev);else upcoming.push(ev);
-        }
-      }catch{}
-    }
+    // ESPN racing/motogp scoreboard — range ampio
+    const from='20260101';
+    const to='20261231';
+    try{
+      // Scoreboard anno corrente
+      const d=await fetch(`${ESPN}/racing/motogp/scoreboard`,120000);
+      for(const e of(d?.events||[])){
+        if(seen.has(String(e.id)))continue;seen.add(String(e.id));
+        const ev={
+          idEvent:String(e.id),
+          strEvent:e.name||e.shortName||'',
+          strLeague:'MotoGP',
+          dateEvent:e.date?e.date.split('T')[0]:'',
+          strTime:e.date?e.date.split('T')[1]:'',
+          strVenue:e.venues?.[0]?.fullName||e.location||'',
+          strCountry:e.location||'',
+          intRound:String(e.week?.number||''),
+        };
+        const d2=e.date?new Date(e.date):null;
+        if(d2&&d2<now)past.push(ev);else upcoming.push(ev);
+      }
+    }catch{}
 
+    // TheSportsDB come supplemento
+    try{
+      const[p,n]=await Promise.all([
+        sdb('/eventspastleague.php?id=4407',1800000).catch(()=>null),
+        sdb('/eventsnextleague.php?id=4407',1800000).catch(()=>null),
+      ]);
+      for(const e of(p?.events||[])){
+        if(!seen.has(String(e.idEvent))){seen.add(String(e.idEvent));past.push(e);}
+      }
+      for(const e of(n?.events||[])){
+        if(!seen.has(String(e.idEvent))){seen.add(String(e.idEvent));upcoming.push(e);}
+      }
+    }catch{}
+
+    // Ordina
+    past.sort((a,b)=>new Date(b.dateEvent||b.date||0)-new Date(a.dateEvent||a.date||0));
+    upcoming.sort((a,b)=>new Date(a.dateEvent||a.date||0)-new Date(b.dateEvent||b.date||0));
     res.json({past,upcoming});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -690,10 +686,26 @@ app.get('/sport/motogp/calendar',async(req,res)=>{
 app.get('/sport/motogp/table',async(req,res)=>{
   try{
     const y=new Date().getFullYear();
-    for(const s of[`${y}`,`${y-1}`]){
-      const d=await sdb(`/lookuptable.php?l=4407&s=${s}`,3600000).catch(()=>null);
-      if(d?.table?.length>0)return res.json({table:d.table});
+    // TheSportsDB — prova anni in ordine decrescente
+    for(const s of[`${y}`,`${y-1}`,`${y-2}`]){
+      try{
+        const d=await sdb(`/lookuptable.php?l=4407&s=${s}`,3600000);
+        if(d?.table?.length>0)return res.json({table:d.table,season:s});
+      }catch{}
     }
+    // Fallback ESPN standings motogp
+    try{
+      const d=await fetch(`${ESPN}/racing/motogp/standings`,3600000);
+      const entries=d?.standings?.[0]?.entries||d?.entries||[];
+      if(entries.length>0){
+        return res.json({table:entries.map((e,i)=>({
+          intRank:String(i+1),
+          strTeam:e.athlete?.displayName||e.team?.displayName||'',
+          intPoints:String(e.points||0),
+          intPlayed:String(e.starts||0),
+        }))});
+      }
+    }catch{}
     res.json({table:[]});
   }catch(e){res.status(500).json({error:e.message});}
 });
