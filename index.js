@@ -732,76 +732,79 @@ app.get('/sport/f1/last',async(req,res)=>{try{res.json(await ergast('/current/la
 // ══════════════════════════════════════════════════════════════════════════════
 
 // Parser calendario MotoGP da wikitext Wikipedia
-// Struttura confermata dal wikitext reale:
-// ! 1          ← round (riga con !)
-// | 1 March    ← data
+// Struttura CONFERMATA:
+// ! 1                                         ← round header con !
+// | 1 March                                   ← data
 // |{{flagicon|THA}} [[Thailand motorcycle Grand Prix|PT Grand Prix of Thailand]]
 // |[[Chang International Circuit]], [[Buriram]]
+// NOTA: i link GP NON contengono "2026", usano il nome generico
 function parseMotoGPWikitext(wt){
   const year = new Date().getFullYear();
   const months = {january:1,february:2,march:3,april:4,may:5,june:6,
     july:7,august:8,september:9,october:10,november:11,december:12};
 
-  // Trova il blocco della tabella calendario (dopo "provisionally scheduled")
-  const tableStart = wt.indexOf('{| class="wikitable"', wt.indexOf('provisionally scheduled'));
+  // Trova la tabella calendario (dopo "provisionally scheduled")
+  const anchor = wt.indexOf('provisionally scheduled');
+  const tableStart = wt.indexOf('{| class="wikitable"', anchor >= 0 ? anchor : 0);
   if(tableStart < 0) return [];
-  const tableEnd = wt.indexOf('|}', tableStart);
-  const table = wt.slice(tableStart, tableEnd > 0 ? tableEnd + 2 : wt.length);
+  const tableEnd = wt.indexOf('\n|}', tableStart);
+  const table = wt.slice(tableStart, tableEnd > 0 ? tableEnd + 3 : wt.length);
 
-  // Splitta per righe separatrici |-
-  const rowBlocks = table.split(/^\|-$/m);
+  // Split per separatore di riga |-
+  const rowBlocks = table.split(/\n\|-\n/);
   const races = [];
 
   for(const block of rowBlocks){
     const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
-
-    let round = null, dateStr = '', dateISO = '', gpName = '', circuit = '', country = '';
+    let round = null, dateISO = '', gpName = '', circuit = '', country = '';
 
     for(const line of lines){
-      // Round: riga che inizia con ! e contiene solo numero
-      if(/^!\s*\d+\s*$/.test(line)){
-        round = parseInt(line.replace(/!/g,'').trim());
+      // Round: ! 1  (solo numero dopo !)
+      if(!round){
+        const rm = line.match(/^!\s*(\d+)\s*$/);
+        if(rm){ round = parseInt(rm[1]); continue; }
+      }
+
+      // Data: | 1 March  o  | 22 March
+      if(!dateISO){
+        const dm = line.match(/^\|\s*(\d{1,2})(?:[–\-]\d{1,2})?\s+(January|February|March|April|May|June|July|August|September|October|November|December)/i);
+        if(dm){
+          const mon = months[dm[2].toLowerCase()] || 1;
+          dateISO = `${year}-${String(mon).padStart(2,'0')}-${String(parseInt(dm[1])).padStart(2,'0')}`;
+          continue;
+        }
+      }
+
+      // GP name: riga con flagicon — estrai testo dopo | nel link GP
+      if(!gpName && line.includes('flagicon')){
+        const flagM = line.match(/\{\{flagicon\|([^|}]+)/);
+        if(flagM) country = flagM[1].trim();
+        // Link: [[X motorcycle Grand Prix|Nome Sponsorizzato Grand Prix of Y]]
+        // Vogliamo estrarre il paese/luogo dal nome generico del GP
+        // Strategia: prendi il titolo del link (parte prima del |) e puliscilo
+        const linkM = line.match(/\[\[([^\]|]+(?:motorcycle Grand Prix|Grand Prix)[^\]|]*)(?:\|([^\]]+))?\]\]/i);
+        if(linkM){
+          // Usa il titolo del link (linkM[1]) che è il nome generico
+          // es: "Thailand motorcycle Grand Prix" → "GP Thailandia"
+          let rawName = linkM[1].trim();
+          // Rimuovi "motorcycle " e normalizza
+          rawName = rawName
+            .replace(/\s*motorcycle\s*/gi, ' ')
+            .replace(/Grand Prix of the\s*/i, 'GP of the ')
+            .replace(/\s*Grand Prix\s*$/i, ' GP')
+            .replace(/^GP\s+/i, '')
+            .replace(/\s+/g, ' ').trim();
+          gpName = rawName;
+        }
         continue;
       }
 
-      // Data: | 1 March  oppure | 22 March–...
-      if(!dateStr){
-        const dm = line.match(/^\|\s*(\d{1,2})(?:[–-]\d{1,2})?\s+(January|February|March|April|May|June|July|August|September|October|November|December)/i);
-        if(dm){
-          const day = parseInt(dm[1]);
-          const mon = months[dm[2].toLowerCase()] || 1;
-          dateISO = `${year}-${String(mon).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-          dateStr = `${dm[1]} ${dm[2]}`;
-          continue;
+      // Circuito: riga con [[NomeCircuito]] senza flagicon
+      if(!circuit && !line.includes('flagicon') && !line.includes('Grand Prix') && line.startsWith('|')){
+        const cm = line.match(/\[\[([^\]|]{4,70})(?:\|[^\]]+)?\]\]/);
+        if(cm && !cm[1].includes('Ref') && !cm[1].includes('List of')){
+          circuit = cm[1].trim();
         }
-      }
-
-      // GP name: riga con flagicon + link GP
-      if(!gpName){
-        const flagM = line.match(/\{\{flagicon\|([^}]+)\}\}/);
-        if(flagM) country = flagM[1].trim();
-        // Link GP: [[X motorcycle Grand Prix|Nome GP]] oppure [[X Grand Prix|Nome]]
-        const gpM = line.match(/\[\[[^\]]*?(?:Grand Prix|motorcycle Grand Prix)[^\]]*?\|([^\]]+)\]\]/i)
-                 || line.match(/\[\[([^\]|]*(?:Grand Prix)[^\]|]*)\]\]/i);
-        if(gpM){
-          gpName = gpM[1].trim()
-            .replace(/Grand Prix of the\s*/i,'GP of the ')
-            .replace(/\s*Grand Prix/i,' GP')
-            // Rimuovi sponsor title prima del "GP of/Grand Prix"
-            .replace(/^.+?(?=GP of|GP\b)/i, s => {
-              // Tieni solo se inizia con un paese/luogo
-              const clean = s.replace(/^[A-Z][a-z]+ [A-Z][a-z]+ [\d,\s]*/,'').trim();
-              return clean||s;
-            })
-            .replace(/\s+/g,' ').trim();
-          continue;
-        }
-      }
-
-      // Circuito: riga con [[CircuitName, City]] (senza flagicon di solito)
-      if(!circuit && !line.includes('flagicon') && !line.includes('Grand Prix')){
-        const circM = line.match(/^\|\[\[([^\]|]{5,80})(?:\|[^\]]+)?\]\]/);
-        if(circM) circuit = circM[1].trim();
       }
     }
 
