@@ -143,21 +143,24 @@ function parseScore(s){
 // ─── Traduci status ESPN → italiano ─────────────────────────────────────────
 function translateStatus(st){
   if(!st)return'';
-  const name=st.name||'';const desc=st.description||'';const detail=st.detail||'';
+  const name=st.name||'';const desc=(st.description||'').toLowerCase();const detail=st.detail||'';
+  const shortDetail=(st.shortDetail||st.name||'').toLowerCase();
   // Partita finita
-  if(name==='STATUS_FULL_TIME'||detail==='FT')return'Tempo Regolamentare';
-  if(name==='STATUS_EXTRA_TIME'||detail==='AET'||detail==='ET')return'Dopo i Supplementari';
-  if(name==='STATUS_PENALTY'||detail==='Pen'||detail==='PSO')return'Dopo i Rigori';
+  if(name==='STATUS_FULL_TIME'||detail==='FT')return'FT';
+  if(name==='STATUS_EXTRA_TIME'||detail==='AET'||detail==='ET'||
+     desc.includes('extra time')||desc.includes('after extra')||shortDetail.includes('aet'))return'dts';
+  if(name==='STATUS_PENALTY'||detail==='Pen'||detail==='PSO'||
+     desc.includes('penalt')||desc.includes('rigori')||shortDetail.includes('pso')||shortDetail.includes('pen'))return'dcr';
   if(name==='STATUS_ABANDONED')return'Abbandonata';
   if(name==='STATUS_POSTPONED')return'Rinviata';
   if(name==='STATUS_SUSPENDED')return'Sospesa';
   if(name==='STATUS_CANCELED')return'Annullata';
   // In corso
-  if(name==='STATUS_IN_PROGRESS'||name==='STATUS_HALFTIME')return desc||'In Corso';
-  if(name==='STATUS_HALFTIME'||detail==='HT')return'Intervallo';
+  if(name==='STATUS_HALFTIME'||detail==='HT'||desc.includes('half'))return'HT';
+  if(name==='STATUS_IN_PROGRESS')return desc||'In Corso';
   // Non iniziata
   if(name==='STATUS_SCHEDULED'||name==='STATUS_UPCOMING')return'';
-  // Extra time
+  // Extra time in corso
   if(name.includes('EXTRA')||detail.includes('ET'))return'Supplementari';
   if(name.includes('PENALTY')||detail.includes('Pen'))return'Rigori';
   return '';
@@ -192,6 +195,8 @@ function normEvent(e,leagueName,leagueSlug){
       clock:comp.status?.displayClock||'',
       round,
       statusDetail:translateStatus(comp.status?.type),
+      homeScorePen:home.shootoutScore!=null?String(home.shootoutScore):'',
+      awayScorePen:away.shootoutScore!=null?String(away.shootoutScore):'',
     };
   }catch{return null;}
 }
@@ -389,30 +394,45 @@ app.get('/sport/soccer/team/:id/events',async(req,res)=>{
     if(id.startsWith('sdb:')){
       const sdbId=id.replace('sdb:','');
       try{
-        const[last,next]=await Promise.all([
+        // SDB: eventslast (ultimi 5) + eventsseason (tutta stagione per le future)
+        const yr=new Date().getFullYear();
+        const season=`${yr-1}-${yr}`;
+        const[last,next,seas]=await Promise.all([
           sdb(`/eventslast.php?id=${sdbId}`,1800000).catch(()=>({results:[]})),
           sdb(`/eventsnext.php?id=${sdbId}`,1800000).catch(()=>({events:[]})),
+          sdb(`/eventsseason.php?id=${sdbId}&s=${season}`,3600000).catch(()=>({events:[]})),
         ]);
-        const past=(last?.results||last?.events||[]).map(e=>({
+        const normSdb=(e,isDone)=>({
           id:String(e.idEvent),
           date:e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',
-          league:e.strLeague||'Serie C',leagueSlug:'ita.3',
+          league:e.strLeague||'',leagueSlug:'ita.3',
           homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
-          homeScore:e.intHomeScore!=null?String(e.intHomeScore):'',
-          awayScore:e.intAwayScore!=null?String(e.intAwayScore):'',
-          homeId:'',awayId:'',completed:e.intHomeScore!=null,live:false,clock:'',
-          round:e.intRound?`Giornata ${e.intRound}`:'',statusDetail:'',
-        }));
-        const future=(next?.events||[]).map(e=>({
-          id:String(e.idEvent),
-          date:e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',
-          league:e.strLeague||'Serie C',leagueSlug:'ita.3',
-          homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
-          homeScore:'',awayScore:'',homeId:'',awayId:'',
-          completed:false,live:false,clock:'',
-          round:e.intRound?`Giornata ${e.intRound}`:'',statusDetail:'',
-        }));
-        const all=[...past,...future];
+          homeScore:isDone&&e.intHomeScore!=null?String(e.intHomeScore):'',
+          awayScore:isDone&&e.intAwayScore!=null?String(e.intAwayScore):'',
+          homeId:String(e.idHomeTeam||''),awayId:String(e.idAwayTeam||''),
+          completed:isDone,live:false,clock:'',
+          round:e.intRound?`Giornata ${e.intRound}`:(e.strRound?`Giornata ${e.strRound}`:''),
+          statusDetail:'',
+        });
+        const now=new Date();
+        const seenLocal=new Set();
+        const all=[];
+        // Passate da eventslast
+        for(const e of(last?.results||last?.events||[])){
+          if(!seenLocal.has(e.idEvent)){seenLocal.add(e.idEvent);all.push(normSdb(e,true));}
+        }
+        // Season events: dividi per data in passate/future
+        for(const e of(seas?.events||[])){
+          if(seenLocal.has(e.idEvent))continue;
+          seenLocal.add(e.idEvent);
+          const d=new Date(e.dateEvent||'2000-01-01');
+          const done=e.intHomeScore!=null||(d<now);
+          all.push(normSdb(e,done));
+        }
+        // eventsnext come fallback aggiuntivo
+        for(const e of(next?.events||[])){
+          if(!seenLocal.has(e.idEvent)){seenLocal.add(e.idEvent);all.push(normSdb(e,false));}
+        }
         all.sort((a,b)=>new Date(a.date)-new Date(b.date));
         return res.json({events:all});
       }catch(err){return res.json({events:[],error:err.message});}
@@ -1369,44 +1389,69 @@ app.get('/sport/soccer/cups',async(req,res)=>{
       // TheSportsDB fallback per Conference League (FD non supporta ECSL free tier)
       if(lg.sdbLeague&&events.length===0){
         try{
-          const d=await sdb(`/eventsseason.php?id=${lg.sdbLeague}&s=2024-2025`,7200000).catch(()=>null);
+          const yr=new Date().getFullYear();
+          const season=`${yr-1}-${yr}`;
+          const d=await sdb(`/eventsseason.php?id=${lg.sdbLeague}&s=${season}`,7200000).catch(()=>null);
           for(const e of(d?.events||[])){
             const eid=`sdb:${e.idEvent}`;if(seen.has(eid))continue;seen.add(eid);
             const hs=e.intHomeScore,as=e.intAwayScore;
+            // Mappa round SDB → fase italiana
+            let round='';
+            const rd=(e.strRound||'').toLowerCase();
+            if(rd.includes('final')&&!rd.includes('semi')&&!rd.includes('quarter'))round='Finale';
+            else if(rd.includes('semi'))round='Semifinale';
+            else if(rd.includes('quarter'))round='Quarti di Finale';
+            else if(rd.includes('round of 16')||rd.includes('last 16'))round='Ottavi di Finale';
+            else if(rd.includes('round of 32')||rd.includes('last 32'))round='Sedicesimi di Finale';
+            else if(rd.includes('group')||rd.includes('league phase'))round='Fase a Gironi';
+            else if(rd.includes('playoff'))round='Playoff';
+            else if(rd.includes('qualifying'))round='Qualificazioni';
+            else if(e.strRound)round=`Giornata ${e.strRound}`;
             events.push({
               id:eid,date:e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',
               league:lg.name,leagueSlug:lg.slug,
               homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
               homeScore:hs!=null?String(hs):'',awayScore:as!=null?String(as):'',
               homeId:'',awayId:'',completed:hs!=null,live:false,clock:'',
-              round:e.strRound?`Giornata ${e.strRound}`:'',statusDetail:'',
+              round,statusDetail:'',
             });
           }
         }catch{}
       }
       // football-data fallback: CL/EL usano FD per fasi corrette, Conference non disponibile su FD free
       if(lg.fd&&lg.slug!=='uefa.conference'&&events.length>0){
-        // Arricchisci con stage da FD solo se ESPN non ha round
-        const missingRound=events.filter(e=>!e.round).length;
-        if(missingRound>events.length/2){
-          try{
-            const yr=new Date().getFullYear();
-            let d=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,7200000).catch(()=>null);
-            if(!d?.matches?.length) d=await fd(`/competitions/${lg.fd}/matches?season=${yr-2}`,7200000).catch(()=>null);
-            const fdMap=new Map();
-            for(const m of(d?.matches||[])){
+        // Arricchisci sempre da FD per CL/EL: stage ufficiali
+        try{
+          const yr=new Date().getFullYear();
+          let fdData=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,7200000).catch(()=>null);
+          if(!fdData?.matches?.length) fdData=await fd(`/competitions/${lg.fd}/matches?season=${yr-2}`,7200000).catch(()=>null);
+          if(fdData?.matches?.length){
+            // Mappa: data → stage (più precisa di nome squadra)
+            const fdDateMap=new Map();
+            const fdTeamMap=new Map();
+            for(const m of(fdData.matches||[])){
               const ht=m.homeTeam?.shortName||m.homeTeam?.name||'';
               const at=m.awayTeam?.shortName||m.awayTeam?.name||'';
-              fdMap.set(`${ht}|${at}`,mapStage(m.stage||''));
+              const stage=mapStage(m.stage||m.group||'');
+              if(m.utcDate){
+                const dk=m.utcDate.slice(0,10);
+                fdDateMap.set(dk,stage);
+              }
+              if(ht&&at) fdTeamMap.set(`${ht}|${at}`,stage);
             }
             for(const e of events){
-              if(!e.round){
-                const key=`${e.homeName}|${e.awayName}`;
-                e.round=fdMap.get(key)||'';
+              const dk=e.date?e.date.slice(0,10):'';
+              const teamKey=`${e.homeName}|${e.awayName}`;
+              const stageByDate=fdDateMap.get(dk)||'';
+              const stageByTeam=fdTeamMap.get(teamKey)||'';
+              // Usa FD stage se ESPN non ha round o ha round generico (nome lega)
+              const isGeneric=!e.round||e.round==='Champions League'||e.round==='Europa League'||e.round==='Fase Knockout';
+              if(isGeneric||(stageByTeam&&stageByTeam!==e.round)){
+                e.round=stageByTeam||stageByDate||e.round||'';
               }
             }
-          }catch{}
-        }
+          }
+        }catch{}
       }
       if(events.length===0)continue;
       events.sort((a,b)=>new Date(a.date)-new Date(b.date));
@@ -1416,7 +1461,8 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         if(!phaseMap.has(ph))phaseMap.set(ph,[]);
         phaseMap.get(ph).push(e);
       }
-      const phaseOrder=['Qualificazioni','Fase a Gironi','Playoff','Sedicesimi di Finale',
+      const phaseOrder=['Qualificazioni','Turno Preliminare','Semifinale Preliminare',
+        'Fase a Gironi','Fase Leghe','Playoff','Sedicesimi di Finale',
         'Ottavi di Finale','Quarti di Finale','Semifinale','Andata','Ritorno','Finale',
         'Fase a Eliminazione','Fase Knockout','Partite'];
       const phases=[...phaseMap.entries()]
