@@ -835,86 +835,77 @@ app.get('/sport/tennis/search',async(req,res)=>{
     res.json({players:all.filter(p=>(p.strSport||'').toLowerCase()==='tennis')});
   }catch(e){res.status(500).json({error:e.message});}
 });
+// Parsa nota ESPN tennis: "(2) Jannik Sinner (ITA) bt Hugo Gaston (FRA) 6-2 6-1"
+function parseTennisNote(note){
+  if(!note)return null;
+  const bt=note.match(/^(.+?)\s+(bt|d\.|leads|defeated|vs\.?)\s+(.+?)(\s+[\d\-\s()\/]+(?:ret)?)?$/i);
+  if(!bt)return null;
+  const clean=s=>s.replace(/^\(\d+\)\s*/,'').replace(/\s*\([A-Z]{2,3}\)$/,'').trim();
+  const p1=clean(bt[1]);
+  const p2=clean(bt[3]);
+  const score=(bt[4]||'').trim();
+  const verb=(bt[2]||'').toLowerCase();
+  const completed=verb==='bt'||verb.startsWith('d')||verb==='defeated';
+  return{p1,p2,score,completed};
+}
+
 app.get('/sport/tennis/player/:id/events',async(req,res)=>{
   try{
-    const id=req.params.id;
-    // TheSportsDB — spesso vuoto per top player
-    const toArr=d=>{if(!d)return[];const v=d.results||d.events||d.event||[];return Array.isArray(v)?v:[];};
+    const{id}=req.params;
     let past=[],upcoming=[];
-    try{
-      const[last,next]=await Promise.all([
-        sdb(`/eventslast.php?id=${id}`,1800000),
-        sdb(`/eventsnext.php?id=${id}`,1800000),
-      ]);
-      past=toArr(last);upcoming=toArr(next);
-    }catch{}
 
-    // Se TheSportsDB vuoto, prova con idTeam
-    if(!past.length&&!upcoming.length){
-      try{
-        const info=await sdb(`/lookupplayer.php?id=${id}`,86400000);
-        const teamId=(info?.players||info?.player||[])[0]?.idTeam;
-        if(teamId){
-          const[tl,tn]=await Promise.all([
-            sdb(`/eventslast.php?id=${teamId}`,1800000).catch(()=>null),
-            sdb(`/eventsnext.php?id=${teamId}`,1800000).catch(()=>null),
-          ]);
-          past=toArr(tl);upcoming=toArr(tn);
-        }
-      }catch{}
-    }
+    // Recupera nome giocatore da TheSportsDB
+    const playerInfo=await sdb('/lookupplayer.php?id='+id,86400000).catch(()=>null);
+    const playerName=(playerInfo?.players||playerInfo?.player||[])[0]?.strPlayer||'';
+    const lastName=(playerName.split(' ').pop()||'').toLowerCase();
 
-    // Fallback: ESPN tennis scoreboard — cerca partite recenti/prossime per nome
-    if(!past.length&&!upcoming.length){
-      try{
-        const playerInfo=await sdb('/lookupplayer.php?id='+id,86400000).catch(()=>null);
-        const playerName=(playerInfo?.players||playerInfo?.player||[])[0]?.strPlayer||'';
-        const lastName=(playerName.split(' ').pop()||'').toLowerCase();
-        if(lastName.length>2){
-          const now=new Date();
-          const ranges=[
-            // Ultimi 60 giorni
-            [new Date(now-60*864e5),new Date(now)],
-            // Prossimi 60 giorni
-            [new Date(now),new Date(now.getTime()+60*864e5)],
-          ];
-          for(const [start,end] of ranges){
-            const from=start.toISOString().slice(0,10).replace(/-/g,'');
-            const to=end.toISOString().slice(0,10).replace(/-/g,'');
-            const isFuture=start>=now;
-            try{
-              for(const tour of['atp','wta']){
-                const d=await fetch(`${ESPN}/tennis/${tour}/scoreboard?dates=${from}-${to}`,600000).catch(()=>null);
-                for(const e of(d?.events||[])){
-                  const comp=(e.competitions||[])[0]||{};
-                  const comps=comp.competitors||[];
-                  const involved=comps.some(c=>(c.athlete?.displayName||c.team?.displayName||'').toLowerCase().includes(lastName));
-                  if(!involved)continue;
-                  const st=comp.status?.type||{};
-                  const completed=!!st.completed;
-                  const c1=comps[0],c2=comps[1];
-                  const ev={
-                    idEvent:String(e.id),
-                    strEvent:e.name||e.shortName||'',
-                    strHomeTeam:c1?.athlete?.displayName||c1?.team?.displayName||'',
-                    strAwayTeam:c2?.athlete?.displayName||c2?.team?.displayName||'',
-                    intHomeScore:c1?.score?.value||null,
-                    intAwayScore:c2?.score?.value||null,
-                    dateEvent:e.date?e.date.split('T')[0]:'',
-                    strLeague:e.leagues?.[0]?.name||'Tennis '+tour.toUpperCase(),
-                    strStatus:completed?'Match Finished':'Scheduled',
-                  };
-                  if(isFuture)upcoming.push(ev); else past.push(ev);
-                }
+    if(lastName.length>2){
+      const now=new Date();
+      const fromPast=new Date(now-120*864e5).toISOString().slice(0,10).replace(/-/g,'');
+      const toFuture=new Date(now.getTime()+90*864e5).toISOString().slice(0,10).replace(/-/g,'');
+      for(const tour of['atp','wta']){
+        try{
+          const d=await fetch(`${ESPN}/tennis/${tour}/scoreboard?dates=${fromPast}-${toFuture}`,1800000).catch(()=>null);
+          for(const ev of(d?.events||[])){
+            const tournament=ev.shortName||ev.name||'';
+            for(const grp of(ev.groupings||[])){
+              const grouping=grp.grouping?.displayName||'';
+              for(const comp of(grp.competitions||[])){
+                const note=((comp.notes||[]).map(n=>n.text||'')).find(n=>n.toLowerCase().includes(lastName));
+                if(!note)continue;
+                const parsed=parseTennisNote(note);
+                if(!parsed)continue;
+                const dateStr=comp.date?comp.date.split('T')[0]:(ev.date?ev.date.split('T')[0]:'');
+                const isCompleted=parsed.completed||(comp.status?.type?.completed===true);
+                const isFuture=dateStr&&new Date(dateStr)>now;
+                const entry={
+                  idEvent:String(comp.id||ev.id),
+                  strEvent:tournament,
+                  strSubEvent:grouping,
+                  strHomeTeam:parsed.p1,
+                  strAwayTeam:parsed.p2,
+                  strScore:parsed.score,
+                  intHomeScore:null,intAwayScore:null,
+                  dateEvent:dateStr,
+                  strLeague:tournament,
+                  strStatus:isCompleted?'Match Finished':'Scheduled',
+                };
+                if(isCompleted&&!isFuture)past.push(entry);
+                else upcoming.push(entry);
               }
-            }catch{}
+            }
           }
-        }
-      }catch{}
+        }catch{}
+      }
     }
+
+    // Ordina per data
+    past.sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent));
+    upcoming.sort((a,b)=>new Date(a.dateEvent)-new Date(b.dateEvent));
     res.json({past,upcoming});
   }catch(e){res.status(500).json({error:e.message});}
 });
+
 app.get('/sport/tennis/player/:id/info',async(req,res)=>{
   try{
     const d=await sdb(`/lookupplayer.php?id=${req.params.id}`,86400000);
