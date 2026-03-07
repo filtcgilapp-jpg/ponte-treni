@@ -1506,6 +1506,12 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           }
         }catch{}
       }
+      // Passaggio finale: classifica per data qualsiasi evento ancora senza fase
+      for(const e of events){
+        if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'||e.round==='Champions League'||e.round==='Europa League'||e.round==='Conference League'){
+          e.round=mapPhaseByDate(e.date,lg.slug);
+        }
+      }
       if(events.length===0)continue;
       events.sort((a,b)=>new Date(a.date)-new Date(b.date));
       // Per coppe nazionali senza round: stima fase dal numero partite rimaste
