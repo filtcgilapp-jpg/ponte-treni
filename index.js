@@ -1338,11 +1338,12 @@ app.get('/sport/soccer/cups',async(req,res)=>{
   try{
     const from='20250801';
     const to=new Date(Date.now()+180*864e5).toISOString().slice(0,10).replace(/-/g,'');
-    const results=await Promise.all(CUP_LEAGUES.map(async(lg)=>{
+    const results=[];
+    // Fetch sequenziale per evitare timeout su Render free tier
+    for(const lg of CUP_LEAGUES){
       const events=[];const seen=new Set();
-      // ESPN scoreboard
       try{
-        const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${from}-${to}`,3600000);
+        const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${from}-${to}`,7200000); // 2h cache
         for(const e of(d?.events||[])){
           const ne=normEvent(e,lg.name,lg.slug);
           if(!ne||seen.has(ne.id))continue;
@@ -1352,11 +1353,11 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           seen.add(ne.id);events.push(ne);
         }
       }catch{}
-      // football-data fallback per Conference e coppe con fd
-      if(lg.fd&&events.length<5){
+      // football-data fallback per Conference + coppe con fd e pochi eventi ESPN
+      if(lg.fd&&(events.length<3||lg.slug==='uefa.conference')){
         try{
           const yr=new Date().getFullYear();
-          const d=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,3600000).catch(()=>null);
+          const d=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,7200000).catch(()=>null);
           for(const m of(d?.matches||[])){
             const eid=`fd:${m.id}`;if(seen.has(eid))continue;seen.add(eid);
             events.push({
@@ -1371,8 +1372,8 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           }
         }catch{}
       }
+      if(events.length===0)continue;
       events.sort((a,b)=>new Date(a.date)-new Date(b.date));
-      // Raggruppa per fase
       const phaseMap=new Map();
       for(const e of events){
         const ph=e.round||'Partite';
@@ -1386,9 +1387,9 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         .sort((a,b)=>{const ai=phaseOrder.indexOf(a[0]),bi=phaseOrder.indexOf(b[0]);
           return ai>=0&&bi>=0?ai-bi:ai>=0?-1:bi>=0?1:0;})
         .map(([name,evs])=>({name,events:evs}));
-      return{slug:lg.slug,name:lg.name,group:lg.group,phases,totalEvents:events.length};
-    }));
-    res.json({cups:results.filter(c=>c.totalEvents>0)});
+      results.push({slug:lg.slug,name:lg.name,group:lg.group,phases,totalEvents:events.length});
+    }
+    res.json({cups:results});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
