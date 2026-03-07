@@ -11,7 +11,7 @@ function setC(k,v,ms){cache.set(k,{data:v,exp:Date.now()+ms});}
 async function fetch(url,ttl=300000,headers={}){
   const k=url+JSON.stringify(headers);
   const c=getC(k);if(c)return c;
-  const r=await axios.get(url,{timeout:20000,headers});
+  const r=await axios.get(url,{timeout:8000,headers});
   setC(k,r.data,ttl);return r.data;
 }
 
@@ -26,7 +26,7 @@ const FD_H ={'X-Auth-Token':'138a06978b4b4c11b8fada4a4b9247de'};
 
 async function sdb(path,ttl=600000){
   const c=getC(path);if(c)return c;
-  const r=await axios.get(`${SDB}${path}`,{timeout:20000});
+  const r=await axios.get(`${SDB}${path}`,{timeout:8000});
   setC(path,r.data,ttl);return r.data;
 }
 async function fd(path,ttl=3600000){
@@ -34,7 +34,7 @@ async function fd(path,ttl=3600000){
 }
 async function ergast(path,ttl=3600000){
   const k=`erg:${path}`;const c=getC(k);if(c)return c;
-  const r=await axios.get(`https://api.jolpi.ca/ergast/f1${path}.json`,{timeout:15000});
+  const r=await axios.get(`https://api.jolpi.ca/ergast/f1${path}.json`,{timeout:8000});
   setC(k,r.data,ttl);return r.data;
 }
 
@@ -871,61 +871,54 @@ app.get('/sport/basketball/search',async(req,res)=>{
 app.get('/sport/basketball/team/:league/:id/events',async(req,res)=>{
   try{
     const{league,id}=req.params;
-    const allEvents=[];const seen=new Set();
-    const now=new Date();
-    const from=new Date(now.getTime()-120*864e5).toISOString().slice(0,10).replace(/-/g,'');
-    const to=new Date(now.getTime()+90*864e5).toISOString().slice(0,10).replace(/-/g,'');
+    const seen=new Set();const allEvents=[];
 
-    // Se ID viene da TheSportsDB (sdb:XXXXX), usa SDB per eventi
+    // ID da SDB
     if(id.startsWith('sdb:')){
       const sdbId=id.replace('sdb:','');
-      try{
-        const[last,next]=await Promise.all([
-          sdb(`/eventslast.php?id=${sdbId}`,1800000).catch(()=>null),
-          sdb(`/eventsnext.php?id=${sdbId}`,1800000).catch(()=>null),
-        ]);
-        const past=(last?.results||last?.events||[]);
-        const upcoming=(next?.events||[]);
-        return res.json({events:[...past.map(e=>({
-          id:String(e.idEvent),date:e.dateEvent?e.dateEvent+'T'+e.strTime:e.dateEvent||'',
-          league:e.strLeague||'Basketball',leagueSlug:league,
-          homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
-          homeScore:e.intHomeScore!=null?String(e.intHomeScore):'',
-          awayScore:e.intAwayScore!=null?String(e.intAwayScore):'',
-          homeId:'',awayId:'',completed:!!e.intHomeScore||e.strStatus==='Match Finished',
-          live:false,clock:'',round:e.intRound?`Giornata ${e.intRound}`:'',
-        })),...upcoming.map(e=>({
-          id:String(e.idEvent),date:e.dateEvent?e.dateEvent+'T'+(e.strTime||'00:00:00'):e.dateEvent||'',
-          league:e.strLeague||'Basketball',leagueSlug:league,
-          homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
-          homeScore:'',awayScore:'',homeId:'',awayId:'',
-          completed:false,live:false,clock:'',round:e.intRound?`Giornata ${e.intRound}`:'',
-        }))]});
-      }catch{}
-      return res.json({events:[]});
+      const[last,next]=await Promise.all([
+        sdb(`/eventslast.php?id=${sdbId}`,1800000).catch(()=>null),
+        sdb(`/eventsnext.php?id=${sdbId}`,1800000).catch(()=>null),
+      ]);
+      const mapE=(e,future=false)=>({
+        id:String(e.idEvent||Math.random()),
+        date:e.dateEvent?e.dateEvent+'T'+(e.strTime||'12:00:00'):'',
+        league:e.strLeague||'Basketball',leagueSlug:league,
+        homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
+        homeScore:!future&&e.intHomeScore!=null?String(e.intHomeScore):'',
+        awayScore:!future&&e.intAwayScore!=null?String(e.intAwayScore):'',
+        homeId:'',awayId:'',
+        completed:!future&&(e.intHomeScore!=null||e.strStatus==='Match Finished'),
+        live:false,clock:'',round:e.intRound?`Giornata ${e.intRound}`:'',
+      });
+      const events=[
+        ...(last?.results||last?.events||[]).map(e=>mapE(e,false)),
+        ...(next?.events||[]).map(e=>mapE(e,true)),
+      ];
+      return res.json({events});
     }
 
-    // ID ESPN — usa schedule + scoreboard
-    for(const lg of BBALL_LEAGUES){
-      try{
-        const d=await fetch(`${ESPN}/basketball/${lg.slug}/teams/${id}/schedule`,3600000);
-        for(const e of(d?.events||[])){
-          if(!e||e.$ref)continue;
-          const ne=normEvent(e,lg.name,lg.slug);if(!ne||seen.has(ne.id))continue;
-          seen.add(ne.id);allEvents.push(ne);
-        }
-      }catch{}
-    }
-    // Scoreboard future per ogni lega
-    for(const lg of BBALL_LEAGUES){
-      try{
-        const d=await fetch(`${ESPN}/basketball/${lg.slug}/scoreboard?dates=${from}-${to}`,300000);
-        for(const e of(d?.events||[])){
-          const ne=normEvent(e,lg.name,lg.slug);if(!ne||seen.has(ne.id))continue;
-          if(ne.homeId!==id&&ne.awayId!==id)continue;
-          seen.add(ne.id);allEvents.push(ne);
-        }
-      }catch{}
+    // ID ESPN: schedule dalla lega specifica
+    const leagueSlug=league||'nba';
+    try{
+      const d=await fetch(`${ESPN}/basketball/${leagueSlug}/teams/${id}/schedule`,3600000);
+      for(const e of(d?.events||[])){
+        const ne=normEvent(e,leagueSlug,leagueSlug);
+        if(ne&&!seen.has(ne.id)){seen.add(ne.id);allEvents.push(ne);}
+      }
+    }catch{}
+    // Se vuoto, prova anche le altre leghe (max 2 in parallelo)
+    if(allEvents.length===0){
+      const others=BBALL_LEAGUES.filter(l=>l.slug!==leagueSlug).slice(0,2);
+      await Promise.all(others.map(async lg=>{
+        try{
+          const d=await fetch(`${ESPN}/basketball/${lg.slug}/teams/${id}/schedule`,3600000);
+          for(const e of(d?.events||[])){
+            const ne=normEvent(e,lg.name,lg.slug);
+            if(ne&&!seen.has(ne.id)){seen.add(ne.id);allEvents.push(ne);}
+          }
+        }catch{}
+      }));
     }
     allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
     res.json({events:allEvents});
@@ -987,8 +980,8 @@ app.get('/sport/tennis/player/:id/events',async(req,res)=>{
 
     if(lastName.length>2){
       const now=new Date();
-      const fromPast=new Date(now-120*864e5).toISOString().slice(0,10).replace(/-/g,'');
-      const toFuture=new Date(now.getTime()+90*864e5).toISOString().slice(0,10).replace(/-/g,'');
+      const fromPast=new Date(now-60*864e5).toISOString().slice(0,10).replace(/-/g,'');
+      const toFuture=new Date(now.getTime()+60*864e5).toISOString().slice(0,10).replace(/-/g,'');
       for(const tour of['atp','wta']){
         try{
           const d=await fetch(`${ESPN}/tennis/${tour}/scoreboard?dates=${fromPast}-${toFuture}`,1800000).catch(()=>null);
@@ -1044,13 +1037,12 @@ app.get('/sport/tennis/ranking/:type',async(req,res)=>{
     // ESPN usa ESPN2 (site.web.api.espn.com) per rankings
     const urls=[
       `https://site.web.api.espn.com/apis/v2/sports/tennis/${tour}/rankings?limit=100`,
-      `${ESPN2}/tennis/${tour}/rankings?limit=100`,
-      `${ESPN}/tennis/${tour}/rankings`,
+      `https://site.api.espn.com/apis/site/v2/sports/tennis/${tour}/rankings?limit=100`,
     ];
     for(const url of urls){
       try{
         const d=await fetch(url,3600000);
-        const entries=d?.rankings?.[0]?.entries||d?.entries||d?.athletes||[];
+        const entries=d?.rankings?.[0]?.entries||d?.rankings||d?.entries||d?.athletes||[];
         if(entries.length>0){
           return res.json({rankings:entries.slice(0,100).map((e,i)=>({
             rank:e.currentRanking||e.ranking||i+1,
@@ -1062,18 +1054,6 @@ app.get('/sport/tennis/ranking/:type',async(req,res)=>{
         }
       }catch{}
     }
-    // Fallback: TheSportsDB top 50 per tour
-    try{
-      const leagueId=isWTA?'4303':'4302';
-      const d=await sdb(`/lookup_all_players.php?id=${leagueId}`,86400000).catch(()=>null);
-      if((d?.player||[]).length>0){
-        return res.json({rankings:(d.player||[]).slice(0,50).map((p,i)=>({
-          rank:i+1,name:p.strPlayer||'',
-          country:p.strNationality||'',points:0,
-          id:String(p.idPlayer||''),
-        }))});
-      }
-    }catch{}
     res.json({rankings:[]});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -1090,59 +1070,48 @@ async function openf1(path,ttl=60000){
 }
 
 // ── F1 Calendario (Jolpica/Ergast, fallback OpenF1 sessions) ─────────────────
+// ── Calendario F1 2026 hardcoded (fonte: fia.com) ────────────────────────────
+const F1_2026=[
+  {round:'1', raceName:'Australian Grand Prix',   date:'2026-03-15',Circuit:{circuitName:'Albert Park Circuit',        Location:{country:'Australia'}}},
+  {round:'2', raceName:'Chinese Grand Prix',       date:'2026-03-22',Circuit:{circuitName:'Shanghai International Circuit',Location:{country:'China'}}},
+  {round:'3', raceName:'Japanese Grand Prix',      date:'2026-04-05',Circuit:{circuitName:'Suzuka International Racing Course',Location:{country:'Japan'}}},
+  {round:'4', raceName:'Bahrain Grand Prix',       date:'2026-04-19',Circuit:{circuitName:'Bahrain International Circuit',  Location:{country:'Bahrain'}}},
+  {round:'5', raceName:'Saudi Arabian Grand Prix', date:'2026-04-26',Circuit:{circuitName:'Jeddah Corniche Circuit',       Location:{country:'Saudi Arabia'}}},
+  {round:'6', raceName:'Miami Grand Prix',         date:'2026-05-10',Circuit:{circuitName:'Miami International Autodrome', Location:{country:'USA'}}},
+  {round:'7', raceName:'Emilia Romagna Grand Prix',date:'2026-05-24',Circuit:{circuitName:'Autodromo Enzo e Dino Ferrari',  Location:{country:'Italy'}}},
+  {round:'8', raceName:'Monaco Grand Prix',        date:'2026-05-31',Circuit:{circuitName:'Circuit de Monaco',             Location:{country:'Monaco'}}},
+  {round:'9', raceName:'Spanish Grand Prix',       date:'2026-06-07',Circuit:{circuitName:'Circuit de Barcelona-Catalunya',Location:{country:'Spain'}}},
+  {round:'10',raceName:'Canadian Grand Prix',      date:'2026-06-21',Circuit:{circuitName:'Circuit Gilles Villeneuve',    Location:{country:'Canada'}}},
+  {round:'11',raceName:'Austrian Grand Prix',      date:'2026-06-28',Circuit:{circuitName:'Red Bull Ring',                Location:{country:'Austria'}}},
+  {round:'12',raceName:'British Grand Prix',       date:'2026-07-05',Circuit:{circuitName:'Silverstone Circuit',          Location:{country:'UK'}}},
+  {round:'13',raceName:'Belgian Grand Prix',       date:'2026-07-26',Circuit:{circuitName:'Circuit de Spa-Francorchamps', Location:{country:'Belgium'}}},
+  {round:'14',raceName:'Hungarian Grand Prix',     date:'2026-08-02',Circuit:{circuitName:'Hungaroring',                  Location:{country:'Hungary'}}},
+  {round:'15',raceName:'Dutch Grand Prix',         date:'2026-08-30',Circuit:{circuitName:'Circuit Zandvoort',            Location:{country:'Netherlands'}}},
+  {round:'16',raceName:'Italian Grand Prix',       date:'2026-09-06',Circuit:{circuitName:'Autodromo Nazionale Monza',    Location:{country:'Italy'}}},
+  {round:'17',raceName:'Azerbaijan Grand Prix',    date:'2026-09-20',Circuit:{circuitName:'Baku City Circuit',            Location:{country:'Azerbaijan'}}},
+  {round:'18',raceName:'Singapore Grand Prix',     date:'2026-10-04',Circuit:{circuitName:'Marina Bay Street Circuit',    Location:{country:'Singapore'}}},
+  {round:'19',raceName:'United States Grand Prix', date:'2026-10-18',Circuit:{circuitName:'Circuit of the Americas',     Location:{country:'USA'}}},
+  {round:'20',raceName:'Mexico City Grand Prix',   date:'2026-10-25',Circuit:{circuitName:'Autodromo Hermanos Rodriguez', Location:{country:'Mexico'}}},
+  {round:'21',raceName:'São Paulo Grand Prix',     date:'2026-11-08',Circuit:{circuitName:'Autodromo Jose Carlos Pace',   Location:{country:'Brazil'}}},
+  {round:'22',raceName:'Las Vegas Grand Prix',     date:'2026-11-21',Circuit:{circuitName:'Las Vegas Street Circuit',     Location:{country:'USA'}}},
+  {round:'23',raceName:'Qatar Grand Prix',         date:'2026-11-29',Circuit:{circuitName:'Lusail International Circuit', Location:{country:'Qatar'}}},
+  {round:'24',raceName:'Abu Dhabi Grand Prix',     date:'2026-12-06',Circuit:{circuitName:'Yas Marina Circuit',           Location:{country:'UAE'}}},
+];
+
 app.get('/sport/f1/calendar',async(req,res)=>{
   try{
     const now=new Date();
-    // Prova Jolpica per anno corrente
-    let races=[];
-    try{
-      const cal=await ergast(`/${F1Y}`);
-      races=cal?.MRData?.RaceTable?.Races||[];
-    }catch{}
-
-    // Se Jolpica non ha dati 2026, costruiamo da OpenF1 meetings
-    if(races.length===0){
+    // Clone per non modificare l'originale
+    const races=F1_2026.map(r=>({...r}));
+    // Aggiungi risultati solo per l'ultima gara passata (1 chiamata max)
+    const pastRaces=races.filter(r=>new Date(r.date)<now);
+    if(pastRaces.length>0){
+      const last=pastRaces[pastRaces.length-1];
       try{
-        const meetings=await openf1(`/meetings?year=${F1Y}`,3600000);
-        races=(meetings||[]).filter(m=>m.circuit_short_name).map(m=>({
-          round:m.meeting_key,
-          raceName:m.meeting_name,
-          date:m.date_start?m.date_start.slice(0,10):'',
-          time:m.date_start?m.date_start.slice(11):'',
-          Circuit:{circuitName:m.circuit_short_name,Location:{country:m.country_name,locality:m.location}},
-          _openf1_key:m.meeting_key,
-        }));
-        races.sort((a,b)=>new Date(a.date)-new Date(b.date));
+        const r=await ergast(`/${F1Y}/${last.round}/results`);
+        last.Results=(r?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,3);
       }catch{}
     }
-
-    // Risultati gare passate (Jolpica prima, poi OpenF1)
-    await Promise.all(races.map(async(race)=>{
-      const raceDate=new Date(race.date);
-      if(raceDate>=now) return;
-      try{
-        if(race.round&&!race._openf1_key){
-          const r=await ergast(`/${F1Y}/${race.round}/results`);
-          race.Results=(r?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,3);
-        } else {
-          // OpenF1: risultati gara da position data
-          const key=race._openf1_key||race.round;
-          const pos=await openf1(`/position?meeting_key=${key}&position<=3`,300000);
-          if(pos&&pos.length>0){
-            // Raggruppa per driver e prendi posizione finale
-            const finals={};
-            for(const p of pos){if(!finals[p.driver_number]||p.date>finals[p.driver_number].date) finals[p.driver_number]=p;}
-            const top3=Object.values(finals).filter(p=>p.position<=3).sort((a,b)=>a.position-b.position);
-            // Nomi piloti da drivers endpoint
-            const drvs=await openf1(`/drivers?meeting_key=${key}`,3600000).catch(()=>[]);
-            race.Results=top3.map(p=>{
-              const d=drvs.find(dr=>dr.driver_number===p.driver_number)||{};
-              return{position:String(p.position),Driver:{familyName:d.last_name||String(p.driver_number),givenName:d.first_name||''},Constructor:{name:d.team_name||''}};
-            });
-          }
-        }
-      }catch{}
-    }));
     res.json({MRData:{RaceTable:{Races:races}}});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -1150,29 +1119,25 @@ app.get('/sport/f1/calendar',async(req,res)=>{
 // ── F1 Classifica Piloti ──────────────────────────────────────────────────────
 app.get('/sport/f1/drivers',async(req,res)=>{
   try{
-    // 1. Jolpica anno corrente
-    for(const y of[F1Y,F1Y-1]){
-      const d=await ergast(`/${y}/driverStandings`).catch(()=>null);
-      if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.length>0) return res.json(d);
-    }
-    // 2. OpenF1: costruiamo classifica da stints/risultati disponibili
-    // OpenF1 non ha standings diretti, usiamo ESPN come fallback
-    const espn=await axios.get('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings',{timeout:10000}).catch(()=>null);
-    if(espn?.data){
-      const cats=espn.data.standings||[];
-      for(const cat of cats){
-        const entries=cat.entries||[];
-        if(entries.length>0){
-          const list=entries.map((e,i)=>({
-            position:String(i+1),
-            points:String(e.stats?.find(s=>s.name==='points')?.value||0),
-            wins:String(e.stats?.find(s=>s.name==='wins')?.value||0),
-            Driver:{givenName:e.athlete?.firstName||'',familyName:e.athlete?.lastName||'',nationality:e.athlete?.flag?.alt||''},
-            Constructors:[{name:e.team?.displayName||''}],
-          }));
-          return res.json({MRData:{StandingsTable:{StandingsLists:[{DriverStandings:list}]}}});
-        }
+    // ESPN standings F1
+    try{
+      const espn=await fetch('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings',60000);
+      const entries=espn?.standings?.[0]?.entries||espn?.items?.[0]?.standings?.entries||[];
+      if(entries.length>0){
+        const list=entries.map((e,i)=>({
+          position:String(i+1),
+          points:String(e.stats?.find(s=>s.name==='points')?.value||0),
+          wins:String(e.stats?.find(s=>s.name==='wins')?.value||0),
+          Driver:{givenName:e.athlete?.firstName||'',familyName:e.athlete?.lastName||'',nationality:e.athlete?.flag?.alt||''},
+          Constructors:[{name:e.team?.displayName||''}],
+        }));
+        return res.json({MRData:{StandingsTable:{StandingsLists:[{season:String(F1Y),DriverStandings:list}]}}});
       }
+    }catch{}
+    // Jolpica fallback
+    for(const y of[F1Y,F1Y-1]){
+      const d=await ergast(`/${y}/driverStandings`,3600000).catch(()=>null);
+      if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.length>0) return res.json(d);
     }
     res.status(500).json({error:'Dati non disponibili'});
   }catch(e){res.status(500).json({error:e.message});}
@@ -1181,25 +1146,24 @@ app.get('/sport/f1/drivers',async(req,res)=>{
 // ── F1 Classifica Costruttori ─────────────────────────────────────────────────
 app.get('/sport/f1/constructors',async(req,res)=>{
   try{
-    for(const y of[F1Y,F1Y-1]){
-      const d=await ergast(`/${y}/constructorStandings`).catch(()=>null);
-      if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings?.length>0) return res.json(d);
-    }
-    const espn=await axios.get('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings?type=constructor',{timeout:10000}).catch(()=>null);
-    if(espn?.data){
-      const cats=espn.data.standings||[];
-      for(const cat of cats){
-        const entries=cat.entries||[];
-        if(entries.length>0){
-          const list=entries.map((e,i)=>({
-            position:String(i+1),
-            points:String(e.stats?.find(s=>s.name==='points')?.value||0),
-            wins:String(e.stats?.find(s=>s.name==='wins')?.value||0),
-            Constructor:{name:e.team?.displayName||'',nationality:''},
-          }));
-          return res.json({MRData:{StandingsTable:{StandingsLists:[{ConstructorStandings:list}]}}});
-        }
+    // ESPN standings costruttori F1
+    try{
+      const espn=await fetch('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings?type=constructor',60000);
+      const entries=espn?.standings?.[0]?.entries||espn?.items?.[0]?.standings?.entries||[];
+      if(entries.length>0){
+        const list=entries.map((e,i)=>({
+          position:String(i+1),
+          points:String(e.stats?.find(s=>s.name==='points')?.value||0),
+          wins:String(e.stats?.find(s=>s.name==='wins')?.value||0),
+          Constructor:{name:e.team?.displayName||'',nationality:''},
+        }));
+        return res.json({MRData:{StandingsTable:{StandingsLists:[{ConstructorStandings:list}]}}});
       }
+    }catch{}
+    // Jolpica fallback
+    for(const y of[F1Y,F1Y-1]){
+      const d=await ergast(`/${y}/constructorStandings`,3600000).catch(()=>null);
+      if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings?.length>0) return res.json(d);
     }
     res.status(500).json({error:'Dati non disponibili'});
   }catch(e){res.status(500).json({error:e.message});}
@@ -1208,40 +1172,13 @@ app.get('/sport/f1/constructors',async(req,res)=>{
 // ── F1 Ultima gara ────────────────────────────────────────────────────────────
 app.get('/sport/f1/last',async(req,res)=>{
   try{
-    // Jolpica
+    // Jolpica /current/last
     const d=await ergast('/current/last/results',300000).catch(()=>null);
     if(d?.MRData?.RaceTable?.Races?.[0]?.Results?.length>0) return res.json(d);
-
-    // OpenF1: ultima sessione di tipo Race
-    const sessions=await openf1(`/sessions?session_name=Race&year=${F1Y}`,300000);
-    if(!sessions||sessions.length===0) return res.status(404).json({error:'Nessuna gara'});
-    const last=sessions.filter(s=>new Date(s.date_end)<new Date()).sort((a,b)=>new Date(b.date_end)-new Date(a.date_end))[0];
-    if(!last) return res.status(404).json({error:'Nessuna gara passata'});
-
-    // Posizioni finali
-    const [posArr,drvArr]=await Promise.all([
-      openf1(`/position?session_key=${last.session_key}`,300000),
-      openf1(`/drivers?session_key=${last.session_key}`,3600000),
-    ]);
-    // Ultima posizione per ogni pilota
-    const finals={};
-    for(const p of (posArr||[])){if(!finals[p.driver_number]||p.date>finals[p.driver_number].date) finals[p.driver_number]=p;}
-    const sorted=Object.values(finals).sort((a,b)=>a.position-b.position);
-    const Results=sorted.map(p=>{
-      const d=(drvArr||[]).find(dr=>dr.driver_number===p.driver_number)||{};
-      return{
-        position:String(p.position),
-        Driver:{givenName:d.first_name||'',familyName:d.last_name||String(p.driver_number),nationality:d.country_code||''},
-        Constructor:{name:d.team_name||''},
-        points:'',Time:{time:''},status:'Classified',
-      };
-    });
-    res.json({MRData:{RaceTable:{Races:[{
-      raceName:last.meeting_name||last.session_name,
-      date:last.date_start?last.date_start.slice(0,10):'',
-      Circuit:{circuitName:last.circuit_short_name||'',Location:{country:last.country_name||''}},
-      Results,
-    }]}}});
+    // Jolpica anno passato gara finale
+    const d2=await ergast(`/${F1Y-1}/last/results`,3600000).catch(()=>null);
+    if(d2?.MRData?.RaceTable?.Races?.[0]?.Results?.length>0) return res.json(d2);
+    res.json({MRData:{RaceTable:{Races:[]}}});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1410,8 +1347,8 @@ app.get('/sport/motogp/table',async(req,res)=>{
     const y=new Date().getFullYear();
     // 1. ESPN MotoGP standings (source più aggiornata)
     try{
-      const d=await axios.get(`https://site.web.api.espn.com/apis/v2/sports/racing/motogp/standings`,{timeout:10000});
-      const entries=(d.data?.standings?.[0]?.entries||d.data?.entries||[]);
+      const d=await fetch('https://site.web.api.espn.com/apis/v2/sports/racing/motogp/standings',300000);
+      const entries=(d?.standings?.[0]?.entries||d?.entries||[]);
       if(entries.length>0){
         return res.json({table:entries.map((e,i)=>({
           intRank:String(i+1),
@@ -1819,4 +1756,21 @@ app.get('/sport/soccer/cups',async(req,res)=>{
 });
 
 const PORT=process.env.PORT||10000;
+// ── DIAGNOSTICA ─────────────────────────────────────────────────────────────
+app.get('/diag',async(req,res)=>{
+  const results={};
+  const test=async(name,fn)=>{
+    try{const t=Date.now();const d=await fn();results[name]={ok:true,ms:Date.now()-t,sample:JSON.stringify(d).slice(0,120)};}
+    catch(e){results[name]={ok:false,error:e.message};}
+  };
+  await test('jolpica_f1_2025',()=>ergast('/2025/last/results'));
+  await test('jolpica_f1_2026',()=>ergast('/2026'));
+  await test('espn_f1_standings',()=>fetch('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings',10000));
+  await test('espn_motogp_standings',()=>fetch('https://site.web.api.espn.com/apis/v2/sports/racing/motogp/standings',10000));
+  await test('espn_tennis_atp',()=>fetch('https://site.web.api.espn.com/apis/v2/sports/tennis/atp/rankings?limit=10',10000));
+  await test('espn_basket_nba',()=>fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',10000));
+  await test('sdb_motogp',()=>sdb('/lookuptable.php?l=4407&s=2025'));
+  res.json(results);
+});
+
 app.listen(PORT,()=>console.log(`Proxy porta ${PORT}`));
