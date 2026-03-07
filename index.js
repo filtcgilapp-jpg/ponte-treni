@@ -17,6 +17,37 @@ async function fetch(url,ttl=300000,headers={}){
 
 const ESPN ='https://site.api.espn.com/apis/site/v2/sports';
 const ESPN2='https://site.web.api.espn.com/apis/v2/sports';
+const SF   ='https://www.sofascore.com/api/v1';
+const SF_H ={
+  'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+  'Accept':'application/json, text/plain, */*',
+  'Accept-Language':'it-IT,it;q=0.9',
+  'Referer':'https://www.sofascore.com/',
+  'Origin':'https://www.sofascore.com',
+};
+// Sofascore tournament IDs (stagione 2024-25 / 2025-26)
+const SF_LEAGUES={
+  'ita.1':  {tid:23,  name:'Serie A'},
+  'ita.2':  {tid:53,  name:'Serie B'},
+  'ita.3a': {tid:390, name:'Serie C - Girone A'},
+  'ita.3b': {tid:391, name:'Serie C - Girone B'},
+  'ita.3c': {tid:392, name:'Serie C - Girone C'},
+  'ita.coppa_italia': {tid:57, name:'Coppa Italia'},
+  'uefa.champions':   {tid:7,  name:'Champions League'},
+  'uefa.europa':      {tid:679,name:'Europa League'},
+  'uefa.conference':  {tid:17015,name:'Conference League'},
+  'eng.1': {tid:17,  name:'Premier League'},
+  'esp.1': {tid:8,   name:'La Liga'},
+  'ger.1': {tid:35,  name:'Bundesliga'},
+  'fra.1': {tid:34,  name:'Ligue 1'},
+  // Basket
+  'lba':        {tid:332,  name:'LBA'},
+  'euroleague': {tid:3,    name:'EuroLeague'},
+  'eurocup':    {tid:14,   name:'EuroCup'},
+  'nba':        {tid:132,  name:'NBA'},
+  // Motori
+  'motogp':     {tid:11798,name:'MotoGP'},
+};
 const VT   ='https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno';
 const VT_H ={'User-Agent':'Mozilla/5.0','Referer':'https://www.viaggiatreno.it/','Origin':'https://www.viaggiatreno.it'};
 const SDB  ='https://www.thesportsdb.com/api/v1/json/123';
@@ -27,6 +58,18 @@ async function sdb(path,ttl=600000){
   const c=getC(path);if(c)return c;
   const r=await axios.get(`${SDB}${path}`,{timeout:20000});
   setC(path,r.data,ttl);return r.data;
+}
+async function sf(path,ttl=600000){
+  const c=getC('sf:'+path);if(c)return c;
+  const r=await axios.get(`${SF}${path}`,{timeout:20000,headers:SF_H});
+  setC('sf:'+path,r.data,ttl);return r.data;
+}
+async function sfSeason(tid){
+  // Trova la stagione corrente per un torneo Sofascore
+  try{
+    const d=await sf(`/unique-tournament/${tid}/seasons`,3600000);
+    return (d.seasons||[])[0]?.id||null;
+  }catch{return null;}
 }
 async function fd(path,ttl=3600000){
   return fetch(`${FD}${path}`,ttl,FD_H);
@@ -248,6 +291,213 @@ function mapStage(s){
 
 // ─── Mappa fase ESPN → italiano ───────────────────────────────────────────────
 function mapPhaseESPN(raw){ return mapStage(raw); }
+
+// ── SOFASCORE: Standings ─────────────────────────────────────────────────────
+// GET /sport/sofascore/:league/standings → classifica via Sofascore
+app.get('/sport/sofascore/:league/standings',async(req,res)=>{
+  try{
+    const slug=req.params.league;
+    const lg=SF_LEAGUES[slug];
+    if(!lg)return res.status(404).json({error:'League not found',slug});
+    const tid=lg.tid;
+    const sid=await sfSeason(tid);
+    if(!sid)return res.json({standings:[],name:lg.name});
+    const d=await sf(`/unique-tournament/${tid}/season/${sid}/standings/total`,3600000);
+    const rows=[];
+    for(const group of(d.standings||[])){
+      for(const r of(group.rows||[])){
+        rows.push({
+          rank:r.position,
+          name:r.team?.name||'',
+          shortName:r.team?.shortName||r.team?.name||'',
+          teamId:String(r.team?.id||''),
+          played:r.matches,wins:r.wins,draws:r.draws,losses:r.losses,
+          gf:r.scoresFor,ga:r.scoresAgainst,gd:r.scoreDiffFormatted||String((r.scoresFor||0)-(r.scoresAgainst||0)),
+          points:r.points,
+        });
+      }
+    }
+    res.json({standings:rows,name:lg.name,season:sid});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── SOFASCORE: Team events ────────────────────────────────────────────────────
+// GET /sport/sofascore/team/:sfId/events → partite squadra via Sofascore
+app.get('/sport/sofascore/team/:sfId/events',async(req,res)=>{
+  try{
+    const id=req.params.sfId;
+    const normSfEvent=(e)=>{
+      const home=e.homeTeam||{};const away=e.awayTeam||{};
+      const score=e.homeScore||{};const awayScore=e.awayScore||{};
+      const st=e.status?.type||'';
+      const done=st==='finished';
+      const live=st==='inprogress';
+      // Rigori
+      let statusDetail='';
+      if(done){
+        if(e.status?.description?.toLowerCase().includes('penalt')||
+           e.status?.description?.toLowerCase().includes('rigori')||
+           score.penalties!=null) statusDetail='dcr';
+        else if(e.status?.description?.toLowerCase().includes('extra')||
+                e.status?.description?.toLowerCase().includes('supplement')||
+                score.overtime!=null) statusDetail='dts';
+        else statusDetail='FT';
+      }
+      const round=e.roundInfo?.name||
+        (e.roundInfo?.round?`Giornata ${e.roundInfo.round}`:'');
+      return{
+        id:String(e.id),
+        date:e.startTimestamp?new Date(e.startTimestamp*1000).toISOString():'',
+        league:e.tournament?.uniqueTournament?.name||e.tournament?.name||'',
+        leagueSlug:'',
+        homeName:home.shortName||home.name||'',
+        awayName:away.shortName||away.name||'',
+        homeScore:done?String(score.current??''):'',
+        awayScore:done?String(awayScore.current??''):'',
+        homeScorePen:score.penalties!=null?String(score.penalties):'',
+        awayScorePen:awayScore.penalties!=null?String(awayScore.penalties):'',
+        homeId:String(home.id||''),awayId:String(away.id||''),
+        completed:done,live,clock:live?String(e.time?.played||''):'',
+        round,statusDetail,
+      };
+    };
+    const[prev,next]=await Promise.all([
+      sf(`/team/${id}/events/previous/0`,1800000).catch(()=>({events:[]})),
+      sf(`/team/${id}/events/next/0`,1800000).catch(()=>({events:[]})),
+    ]);
+    const allEvs=[
+      ...(prev.events||[]).map(normSfEvent),
+      ...(next.events||[]).map(normSfEvent),
+    ].sort((a,b)=>new Date(a.date)-new Date(b.date));
+    res.json({events:allEvs});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── SOFASCORE: Roster ─────────────────────────────────────────────────────────
+// GET /sport/sofascore/team/:sfId/players → rosa via Sofascore
+app.get('/sport/sofascore/team/:sfId/players',async(req,res)=>{
+  try{
+    const id=req.params.sfId;
+    const d=await sf(`/team/${id}/players`,3600000);
+    const players=(d.players||[]).map(p=>{
+      const pl=p.player||p;
+      const posMap={G:'Portiere',D:'Difensore',M:'Centrocampista',F:'Attaccante'};
+      return{
+        idPlayer:String(pl.id),
+        strPlayer:pl.name||pl.shortName||'',
+        strPosition:posMap[pl.position]||pl.position||'',
+        strNationality:pl.country?.name||'',
+        strNumber:String(pl.jerseyNumber||''),
+      };
+    });
+    res.json({player:players});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── SOFASCORE: Search team ────────────────────────────────────────────────────
+// GET /sport/sofascore/search?q= → cerca squadra su Sofascore
+app.get('/sport/sofascore/search',async(req,res)=>{
+  try{
+    const q=req.query.q||'';
+    if(q.length<2)return res.json({teams:[]});
+    const d=await sf(`/search/teams?q=${encodeURIComponent(q)}&sport=football`,60000);
+    const teams=(d.teams||d.results||[]).map(t=>({
+      id:String(t.id),
+      sfId:String(t.id),
+      name:t.name||'',
+      shortName:t.shortName||t.name||'',
+      league:t.tournament?.uniqueTournament?.name||t.primaryUniqueTournament?.name||'',
+      leagueSlug:'',
+      country:t.country?.name||'',
+    }));
+    res.json({teams});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── SOFASCORE: Live events ────────────────────────────────────────────────────
+// GET /sport/sofascore/live → tutti gli eventi live calcio
+app.get('/sport/sofascore/live',async(req,res)=>{
+  try{
+    const d=await sf('/sport/football/events/live',30000);
+    const evs=(d.events||[]).map(e=>{
+      const home=e.homeTeam||{};const away=e.awayTeam||{};
+      const score=e.homeScore||{};const awayScore=e.awayScore||{};
+      return{
+        id:String(e.id),
+        date:e.startTimestamp?new Date(e.startTimestamp*1000).toISOString():'',
+        league:e.tournament?.uniqueTournament?.name||'',
+        homeName:home.shortName||home.name||'',
+        awayName:away.shortName||away.name||'',
+        homeScore:String(score.current??''),
+        awayScore:String(awayScore.current??''),
+        homeId:String(home.id||''),awayId:String(away.id||''),
+        completed:false,live:true,
+        clock:String(e.time?.played||''),
+        round:'',statusDetail:'',
+      };
+    });
+    res.json({events:evs});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── SOFASCORE: Standings calcio (tutti) ──────────────────────────────────────
+// GET /sport/sofascore/standings/all → classifiche multiple via SF (usato da StandingsTab)
+app.get('/sport/sofascore/standings/all',async(req,res)=>{
+  try{
+    const leagues=['ita.1','ita.2','eng.1','esp.1','ger.1','fra.1','uefa.champions','uefa.europa','uefa.conference'];
+    const results=await Promise.allSettled(leagues.map(async(slug)=>{
+      const lg=SF_LEAGUES[slug];if(!lg)return null;
+      const sid=await sfSeason(lg.tid);if(!sid)return null;
+      const d=await sf(`/unique-tournament/${lg.tid}/season/${sid}/standings/total`,3600000);
+      const rows=[];
+      for(const group of(d.standings||[])){
+        for(const r of(group.rows||[])){
+          rows.push({
+            rank:r.position,name:r.team?.name||'',
+            shortName:r.team?.shortName||r.team?.name||'',
+            teamId:String(r.team?.id||''),
+            played:r.matches,wins:r.wins,draws:r.draws,losses:r.losses,
+            gf:r.scoresFor,ga:r.scoresAgainst,
+            gd:r.scoreDiffFormatted||String((r.scoresFor||0)-(r.scoresAgainst||0)),
+            points:r.points,
+          });
+        }
+      }
+      return{slug,name:lg.name,standings:rows};
+    }));
+    const leagues2=results.filter(r=>r.status==='fulfilled'&&r.value).map(r=>r.value);
+    res.json({leagues:leagues2});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── SOFASCORE: Serie C classifica per girone ─────────────────────────────────
+app.get('/sport/sofascore/serie-c/standings',async(req,res)=>{
+  try{
+    const gironi=['ita.3a','ita.3b','ita.3c'];
+    const results=await Promise.allSettled(gironi.map(async(slug)=>{
+      const lg=SF_LEAGUES[slug];
+      const sid=await sfSeason(lg.tid);if(!sid)return null;
+      const d=await sf(`/unique-tournament/${lg.tid}/season/${sid}/standings/total`,3600000);
+      const rows=[];
+      for(const group of(d.standings||[])){
+        for(const r of(group.rows||[])){
+          rows.push({
+            rank:r.position,name:r.team?.name||'',
+            shortName:r.team?.shortName||r.team?.name||'',
+            teamId:String(r.team?.id||''),
+            played:r.matches,wins:r.wins,draws:r.draws,losses:r.losses,
+            gf:r.scoresFor,ga:r.scoresAgainst,
+            gd:r.scoreDiffFormatted||String((r.scoresFor||0)-(r.scoresAgainst||0)),
+            points:r.points,
+          });
+        }
+      }
+      return{slug,name:lg.name,standings:rows};
+    }));
+    const data=results.filter(r=>r.status==='fulfilled'&&r.value).map(r=>r.value);
+    res.json({gironi:data});
+  }catch(e){res.status(500).json({error:e.message});}
+});
 
 // ── HEALTH ────────────────────────────────────────────────────────────────────
 app.get('/',(req,res)=>res.send('OK '+new Date().toISOString()));
@@ -479,6 +729,29 @@ app.get('/sport/soccer/team/:id/events',async(req,res)=>{
 app.get('/sport/soccer/team/:id/leagues',async(req,res)=>{
   try{
     const id=req.params.id;const map=new Map();
+
+    // Sofascore: trova le leghe della squadra
+    if(id.startsWith('sf:')){
+      const sfId=id.replace('sf:','');
+      try{
+        const d=await sf(`/team/${sfId}/unique-tournament-seasons/1`,3600000).catch(()=>null);
+        const uniqueTournaments=(d?.uniqueTournamentSeasons||[]);
+        for(const ut of uniqueTournaments){
+          const name=ut.uniqueTournament?.name||'';
+          const sfTid=ut.uniqueTournament?.id;
+          // Trova slug dal map SF_LEAGUES
+          const sfEntry=Object.entries(SF_LEAGUES).find(([,v])=>v.tid===sfTid);
+          const slug=sfEntry?sfEntry[0]:`sf_t:${sfTid}`;
+          const isCup=name.toLowerCase().includes('cup')||name.toLowerCase().includes('coppa')||
+            name.toLowerCase().includes('fa ')||name.toLowerCase().includes('pokal');
+          if(name&&!map.has(slug)) map.set(slug,{slug,name,isCup});
+        }
+        // Se non trovato via API, restituisci almeno Serie C generica
+        if(map.size===0) map.set('ita.3',{slug:'ita.3',name:'Serie C',isCup:false});
+      }catch{ map.set('ita.3',{slug:'ita.3',name:'Serie C',isCup:false}); }
+      return res.json({leagues:[...map.values()]});
+    }
+
     await Promise.all(SOCCER_LEAGUES.map(async(lg)=>{
       try{
         const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/schedule`,3600000);
@@ -695,6 +968,26 @@ app.get('/sport/soccer/team/:id/roster',async(req,res)=>{
   try{
     const espnId=String(req.params.id);
     const name=(req.query.name||'').trim();
+
+    // Se ID è sf:XXXXX (Sofascore) → rosa via SF
+    if(espnId.startsWith('sf:')){
+      const sfId=espnId.replace('sf:','');
+      try{
+        const d=await sf(`/team/${sfId}/players`,3600000);
+        const players=(d.players||[]).map(p=>{
+          const pl=p.player||p;
+          const posMap={G:'Portiere',D:'Difensore',M:'Centrocampista',F:'Attaccante'};
+          return{
+            idPlayer:String(pl.id),
+            strPlayer:pl.name||pl.shortName||'',
+            strPosition:posMap[pl.position]||pl.position||'',
+            strNationality:pl.country?.name||'',
+            strNumber:String(pl.jerseyNumber||''),
+          };
+        });
+        return res.json({player:players});
+      }catch(err){return res.json({player:[],error:err.message});}
+    }
 
     // Se ID è sdb:XXXXX (squadra trovata via TheSportsDB), usa SDB per rosa
     if(espnId.startsWith('sdb:')){
