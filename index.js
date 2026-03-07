@@ -1336,25 +1336,31 @@ const CUP_LEAGUES=[
 
 app.get('/sport/soccer/cups',async(req,res)=>{
   try{
-    const from='20250801';
-    const to=new Date(Date.now()+180*864e5).toISOString().slice(0,10).replace(/-/g,'');
+    // Stagione 2025/26: tre chunk da 90 giorni (ESPN max ~90gg per range)
+    const now=new Date();
+    const yyyymmdd=d=>d.toISOString().slice(0,10).replace(/-/g,'');
+    const ranges=[
+      `20250801-20251030`,  // Fase a gironi / qualificazioni
+      `20251030-20260131`,  // Ottavi / quarti invernali
+      `${yyyymmdd(new Date(now.getTime()-30*864e5))}-${yyyymmdd(new Date(now.getTime()+90*864e5))}`, // recente + prossimi 3 mesi
+    ];
     const results=[];
-    // Fetch sequenziale per evitare timeout su Render free tier
     for(const lg of CUP_LEAGUES){
       const events=[];const seen=new Set();
-      try{
-        const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${from}-${to}`,7200000); // 2h cache
-        const rawEvs=d?.events||[];
-        console.log(`[cups] ${lg.slug}: raw=${rawEvs.length} d_keys=${Object.keys(d||{}).slice(0,4)}`);
-        for(const e of rawEvs){
-          const ne=normEvent(e,lg.name,lg.slug);
-          if(!ne||seen.has(ne.id))continue;
-          const comp=(e.competitions||[])[0]||{};
-          const hl=comp.notes?.[0]?.headline||comp.type?.text||'';
-          ne.round=hl?mapPhaseESPN(hl):'';
-          seen.add(ne.id);events.push(ne);
-        }
-      }catch(err){console.log(`[cups] ${lg.slug} ERROR:`,err.message);}
+      for(const dateRange of ranges){
+        try{
+          const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${dateRange}`,7200000);
+          const rawEvs=d?.events||[];
+          for(const e of rawEvs){
+            const ne=normEvent(e,lg.name,lg.slug);
+            if(!ne||seen.has(ne.id))continue;
+            const comp=(e.competitions||[])[0]||{};
+            const hl=comp.notes?.[0]?.headline||comp.type?.text||'';
+            ne.round=hl?mapPhaseESPN(hl):'';
+            seen.add(ne.id);events.push(ne);
+          }
+        }catch{}
+      }
       // football-data fallback per Conference + coppe con fd e pochi eventi ESPN
       if(lg.fd&&(events.length<3||lg.slug==='uefa.conference')){
         try{
@@ -1393,22 +1399,6 @@ app.get('/sport/soccer/cups',async(req,res)=>{
     }
     res.json({cups:results});
   }catch(e){res.status(500).json({error:e.message});}
-});
-
-// Debug singola coppa
-app.get('/sport/soccer/cup-debug/:slug',async(req,res)=>{
-  try{
-    const slug=req.params.slug;
-    const from='20250801';
-    const to=new Date(Date.now()+180*864e5).toISOString().slice(0,10).replace(/-/g,'');
-    const url=`${ESPN}/soccer/${slug}/scoreboard?dates=${from}-${to}`;
-    // Bypass cache per debug
-    const r=await axios.get(url,{timeout:15000});
-    const events=r.data?.events||[];
-    res.json({slug,url,eventCount:events.length,
-      sample:events.slice(0,2).map(e=>({id:e.id,name:e.name,date:e.date})),
-      error:r.data?.error||null});
-  }catch(e){res.status(500).json({error:e.message,stack:e.stack?.substring(0,200)});}
 });
 
 const PORT=process.env.PORT||10000;
