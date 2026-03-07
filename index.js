@@ -181,8 +181,11 @@ function normEvent(e,leagueName,leagueSlug){
     if(!hName&&!aName)return null;
     const st=comp.status?.type||{};
     const completed=!!st.completed;
-    const round=comp.notes?.[0]?.headline||comp.type?.text||
+    let rawRound=comp.notes?.[0]?.headline||comp.type?.text||
                 (e.week?.number?`Giornata ${e.week.number}`:'');
+    // ESPN a volte mette "X advance N-M on penalties" come headline → non è una fase
+    if(/advance|on penalties|win \d|loses \d/i.test(rawRound)) rawRound='';
+    const round=rawRound;
     return{
       id:String(e.id||''),date:e.date||'',
       league:leagueName||e.league?.name||'',
@@ -209,7 +212,7 @@ function mapStage(s){
     'FINAL':'Finale','SEMI_FINALS':'Semifinale','QUARTER_FINALS':'Quarti di Finale',
     'ROUND_OF_16':'Ottavi di Finale','ROUND_OF_32':'Sedicesimi di Finale',
     'ROUND_OF_64':'Trentaduesimi','GROUP_STAGE':'Fase a Gironi',
-    'LEAGUE_STAGE':'Fase a Gironi','LEAGUE STAGE':'Fase a Gironi',
+    'LEAGUE_STAGE':'Fase Leghe','LEAGUE STAGE':'Fase Leghe',
     'PLAYOFF_ROUND_ONE':'Playoff','PLAYOFF_ROUND_TWO':'Playoff',
     'PLAYOFFS':'Playoff','PLAY_OFF_ROUND':'Playoff',
     'QUALIFYING':'Qualificazioni','QUALIFYING_ROUNDS':'Qualificazioni',
@@ -225,7 +228,8 @@ function mapStage(s){
   if(lower==='last 16'||lower==='last_16'||lower.includes('round of 16')||lower.includes('ottavi'))return'Ottavi di Finale';
   if(lower==='last 32'||lower==='last_32'||lower.includes('round of 32'))return'Sedicesimi di Finale';
   if(lower==='last 64'||lower==='last_64'||lower.includes('round of 64'))return'Trentaduesimi';
-  if(lower.includes('league stage')||lower.includes('group stage')||lower.includes('girone'))return'Fase a Gironi';
+  if(lower.includes('league stage'))return'Fase Leghe';
+  if(lower.includes('group stage')||lower.includes('girone'))return'Fase a Gironi';
   if(lower.includes('playoff'))return'Playoff';
   if(lower.includes('qualifying'))return'Qualificazioni';
   if(lower.includes('1st leg')||lower==='andata')return'Andata';
@@ -1439,13 +1443,29 @@ app.get('/sport/soccer/cups',async(req,res)=>{
               }
               if(ht&&at) fdTeamMap.set(`${ht}|${at}`,stage);
             }
+            // Build anche una mappa per data → stage (molte partite stessa data = stessa fase)
+            const fdDateStage=new Map();
+            for(const[dk,stage] of fdDateMap){
+              if(!fdDateStage.has(dk)) fdDateStage.set(dk,stage);
+            }
             for(const e of events){
               const dk=e.date?e.date.slice(0,10):'';
               const teamKey=`${e.homeName}|${e.awayName}`;
-              const stageByDate=fdDateMap.get(dk)||'';
-              const stageByTeam=fdTeamMap.get(teamKey)||'';
-              // Usa FD stage se ESPN non ha round o ha round generico (nome lega)
-              const isGeneric=!e.round||e.round==='Champions League'||e.round==='Europa League'||e.round==='Fase Knockout';
+              let stageByTeam=fdTeamMap.get(teamKey)||'';
+              // Fallback: cerca match parziale sul nome squadra
+              if(!stageByTeam){
+                for(const[k,v] of fdTeamMap){
+                  const [ht,at]=k.split('|');
+                  if((e.homeName&&(e.homeName.includes(ht)||ht.includes(e.homeName)))&&
+                     (e.awayName&&(e.awayName.includes(at)||at.includes(e.awayName)))){
+                    stageByTeam=v; break;
+                  }
+                }
+              }
+              const stageByDate=fdDateStage.get(dk)||'';
+              const isGeneric=!e.round||e.round==='Champions League'||
+                e.round==='Europa League'||e.round==='Conference League'||
+                e.round==='Fase Knockout'||e.round==='Partite';
               if(isGeneric||(stageByTeam&&stageByTeam!==e.round)){
                 e.round=stageByTeam||stageByDate||e.round||'';
               }
@@ -1457,7 +1477,15 @@ app.get('/sport/soccer/cups',async(req,res)=>{
       events.sort((a,b)=>new Date(a.date)-new Date(b.date));
       const phaseMap=new Map();
       for(const e of events){
-        const ph=e.round||'Partite';
+        // Normalizza round: se ESPN usa "X advance N-M on penalties" → assegna a fase appropriata
+        // e aggiungi info rigori allo statusDetail
+        let ph=e.round||'';
+        const penMatch=ph.match(/(.+?)(?:\s+(?:advance|win)\s+[\d-]+\s+on\s+penalties)/i);
+        if(penMatch){
+          if(!e.statusDetail||e.statusDetail==='FT') e.statusDetail='dcr';
+          ph=''; // verrà assegnata alla fase corretta dopo
+        }
+        ph=ph||'Partite';
         if(!phaseMap.has(ph))phaseMap.set(ph,[]);
         phaseMap.get(ph).push(e);
       }
