@@ -1326,7 +1326,7 @@ const CUP_LEAGUES=[
   // Coppe europee
   {slug:'uefa.champions',   name:'Champions League',    fd:'CL',   group:'Europa'},
   {slug:'uefa.europa',      name:'Europa League',       fd:'EL',   group:'Europa'},
-  {slug:'uefa.conference',  name:'Conference League',   fd:'ECSL', group:'Europa'},
+  {slug:'uefa.conference',  name:'Conference League',   fd:null,   sdbLeague:'4480', group:'Europa'},
   {slug:'uefa.super_cup',   name:'UEFA Super Cup',      fd:null,   group:'Europa'},
   // Coppe italiane
   {slug:'ita.coppa_italia', name:'Coppa Italia',        fd:null,   group:'Italia'},
@@ -1366,26 +1366,47 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           }
         }catch{}
       }
-      // football-data fallback per Conference + coppe con fd e pochi eventi ESPN
-      if(lg.fd&&(events.length<3||lg.slug==='uefa.conference')){
+      // TheSportsDB fallback per Conference League (FD non supporta ECSL free tier)
+      if(lg.sdbLeague&&events.length===0){
         try{
-          const yr=new Date().getFullYear();
-          // Prova stagione corrente e precedente
-          let d=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,7200000).catch(()=>null);
-          if(!d?.matches?.length) d=await fd(`/competitions/${lg.fd}/matches?season=${yr-2}`,7200000).catch(()=>null);
-          for(const m of(d?.matches||[])){
-            const eid=`fd:${m.id}`;if(seen.has(eid))continue;seen.add(eid);
+          const d=await sdb(`/eventsseason.php?id=${lg.sdbLeague}&s=2024-2025`,7200000).catch(()=>null);
+          for(const e of(d?.events||[])){
+            const eid=`sdb:${e.idEvent}`;if(seen.has(eid))continue;seen.add(eid);
+            const hs=e.intHomeScore,as=e.intAwayScore;
             events.push({
-              id:eid,date:m.utcDate||'',league:lg.name,leagueSlug:lg.slug,
-              homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
-              awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
-              homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
-              awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
-              homeId:'',awayId:'',completed:m.status==='FINISHED',live:false,clock:'',
-              round:mapStage(m.stage||''),statusDetail:'',
+              id:eid,date:e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',
+              league:lg.name,leagueSlug:lg.slug,
+              homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
+              homeScore:hs!=null?String(hs):'',awayScore:as!=null?String(as):'',
+              homeId:'',awayId:'',completed:hs!=null,live:false,clock:'',
+              round:e.strRound?`Giornata ${e.strRound}`:'',statusDetail:'',
             });
           }
         }catch{}
+      }
+      // football-data fallback: CL/EL usano FD per fasi corrette, Conference non disponibile su FD free
+      if(lg.fd&&lg.slug!=='uefa.conference'&&events.length>0){
+        // Arricchisci con stage da FD solo se ESPN non ha round
+        const missingRound=events.filter(e=>!e.round).length;
+        if(missingRound>events.length/2){
+          try{
+            const yr=new Date().getFullYear();
+            let d=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,7200000).catch(()=>null);
+            if(!d?.matches?.length) d=await fd(`/competitions/${lg.fd}/matches?season=${yr-2}`,7200000).catch(()=>null);
+            const fdMap=new Map();
+            for(const m of(d?.matches||[])){
+              const ht=m.homeTeam?.shortName||m.homeTeam?.name||'';
+              const at=m.awayTeam?.shortName||m.awayTeam?.name||'';
+              fdMap.set(`${ht}|${at}`,mapStage(m.stage||''));
+            }
+            for(const e of events){
+              if(!e.round){
+                const key=`${e.homeName}|${e.awayName}`;
+                e.round=fdMap.get(key)||'';
+              }
+            }
+          }catch{}
+        }
       }
       if(events.length===0)continue;
       events.sort((a,b)=>new Date(a.date)-new Date(b.date));
