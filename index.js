@@ -1798,14 +1798,14 @@ app.get('/diag',async(req,res)=>{
     try{const t=Date.now();const d=await fn();results[name]={ok:true,ms:Date.now()-t,sample:JSON.stringify(d).slice(0,120)};}
     catch(e){results[name]={ok:false,error:e.message};}
   };
-  await test('f1_calendar',async()=>{const r=await ergast('/2026');return{races:r?.MRData?.RaceTable?.Races?.length};});
-  await test('f1_last_race',async()=>{const r=await ergast('/current/last/results');const race=r?.MRData?.RaceTable?.Races?.[0];return{name:race?.raceName,results:race?.Results?.length};});
-  await test('f1_driver_standings',async()=>{const d=await fetch('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings',10000);const e=d?.children?.[0]?.standings?.entries||[];return{count:e.length,first:e[0]?.athlete?.displayName};});
-  await test('tennis_atp_rankings',async()=>{const d=await fetch('https://site.api.espn.com/apis/site/v2/sports/tennis/atp/rankings?limit=5',10000);const e=d?.rankings?.[0]?.entries||[];return{count:e.length,first:e[0]?.athlete?.displayName};});
-  await test('tennis_wta_rankings',async()=>{const d=await fetch('https://site.api.espn.com/apis/site/v2/sports/tennis/wta/rankings?limit=5',10000);const e=d?.rankings?.[0]?.entries||[];return{count:e.length,first:e[0]?.athlete?.displayName};});
-  await test('basket_nba_events',async()=>{const d=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',10000);return{events:d?.events?.length};});
-  await test('motogp_calendar',async()=>{return{races:MOTOGP_2026.length,first:MOTOGP_2026[0]?.strEvent};});
-  await test('wikipedia_motogp_standings',async()=>{const wr=await axios.get('https://en.wikipedia.org/w/api.php?action=parse&page=2025_MotoGP_World_Championship&prop=wikitext&section=0&format=json',{timeout:8000});return{ok:!!wr.data?.parse,len:wr.data?.parse?.wikitext?.['*']?.length};});
+  // F1 ultima gara - struttura raw
+  await test('f1_last_raw',async()=>{const r=await ergast('/current/last/results');const race=r?.MRData?.RaceTable?.Races?.[0];return{raceName:race?.raceName,date:race?.date,results_count:race?.Results?.length,first_result:race?.Results?.[0]?.Driver?.familyName};});
+  // Tennis - struttura raw della risposta site
+  await test('tennis_atp_raw',async()=>{const d=await fetch('https://site.api.espn.com/apis/site/v2/sports/tennis/atp/rankings?limit=3',10000);return{keys:Object.keys(d||{}),rankings_len:d?.rankings?.length,r0_keys:Object.keys(d?.rankings?.[0]||{}),r0_entries:d?.rankings?.[0]?.entries?.length,r0_athletes:d?.rankings?.[0]?.athletes?.length};});
+  // MotoGP standings via motorsportstats (pubblico)
+  await test('moto_stats',async()=>{const d=await axios.get('https://www.motogp.com/api/riders-and-teams/riders?seasonYear=2025&categoryName=MotoGP',{timeout:8000,headers:{'Accept':'application/json','User-Agent':'Mozilla/5.0'}});return{count:d.data?.length||0,first:d.data?.[0]?.name};});
+  // F1 standings stagione corrente - verifica anno
+  await test('f1_standings_season',async()=>{const d=await fetch('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings',10000);const c=d?.children?.[0];return{child_name:c?.name,season:d?.season,year:d?.year,first:c?.standings?.entries?.[0]?.athlete?.displayName,pts:c?.standings?.entries?.[0]?.stats?.find(s=>s.name==='points')?.value};});
   res.json(results);
 });
 
