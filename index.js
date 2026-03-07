@@ -317,6 +317,26 @@ app.get('/sport/soccer/search',async(req,res)=>{
         }
       }catch{}
     }));
+    // Fallback TheSportsDB per leghe non coperte da ESPN (Serie C, leghe minori)
+    if(seen.size===0){
+      try{
+        const d=await sdb(`/searchteams.php?t=${encodeURIComponent(q)}`,3600000);
+        for(const t of(d?.teams||[])){
+          if(!['soccer','football'].includes((t.strSport||'').toLowerCase()))continue;
+          const dn=(t.strTeam||'').toLowerCase();
+          if(!dn.includes(q)&&!(t.strTeamShort||'').toLowerCase().includes(q))continue;
+          if(!seen.has(dn))seen.set(dn,{
+            id:`sdb:${t.idTeam}`,
+            name:t.strTeam,
+            shortName:t.strTeamShort||t.strTeam,
+            league:t.strLeague||'Calcio',
+            leagueSlug:t.strLeague?.toLowerCase().includes('serie b')?'ita.2':
+                       t.strLeague?.toLowerCase().includes('serie c')||t.strLeague?.toLowerCase().includes('lega pro')?'ita.3':
+                       t.strLeague?.toLowerCase().includes('serie a')?'ita.1':'ita.1',
+          });
+        }
+      }catch{}
+    }
     res.json({teams:[...seen.values()]});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -581,6 +601,23 @@ app.get('/sport/soccer/team/:id/roster',async(req,res)=>{
     const espnId=String(req.params.id);
     const name=(req.query.name||'').trim();
 
+    // Se ID è sdb:XXXXX (squadra trovata via TheSportsDB), usa SDB per rosa
+    if(espnId.startsWith('sdb:')){
+      const sdbId=espnId.replace('sdb:','');
+      try{
+        const p=await sdb('/lookup_all_players.php?id='+sdbId,86400000);
+        if((p?.player||[]).length>0){
+          return res.json({player:(p.player||[]).map(pl=>({
+            idPlayer:String(pl.idPlayer),strPlayer:pl.strPlayer||'',
+            strPosition:mapPosition(pl.strPosition||''),
+            strNationality:pl.strNationality||'',strNumber:pl.strNumber||'',
+            strThumb:pl.strThumb||'',dateOfBirth:pl.dateBorn||'',
+          }))});
+        }
+      }catch{}
+      return res.json({player:[]});
+    }
+
     // 1. Name map hardcoded (istantaneo)
     let fdId=null;
     const norm=normName(name);
@@ -827,46 +864,50 @@ app.get('/sport/tennis/player/:id/events',async(req,res)=>{
       }catch{}
     }
 
-    // Se ancora vuoto, prova SofaScore (API pubblica non-auth, dati tennis completi)
+    // Fallback: ESPN tennis scoreboard — cerca partite recenti/prossime per nome
     if(!past.length&&!upcoming.length){
       try{
-        // SofaScore player search per nome → poi eventi
         const playerInfo=await sdb('/lookupplayer.php?id='+id,86400000).catch(()=>null);
         const playerName=(playerInfo?.players||playerInfo?.player||[])[0]?.strPlayer||'';
-        if(playerName){
-          // Cerca player ID su SofaScore
-          const sfSearch=await fetch(
-            'https://api.sofascore.com/api/v1/search/all?q='+encodeURIComponent(playerName)+'&page=0',
-            1800000,{'User-Agent':'Mozilla/5.0','Accept':'application/json'}
-          ).catch(()=>null);
-          const sfPlayers=(sfSearch?.results||[]).filter(r=>r.type==='athlete'&&(r.entity?.sport?.name||'').toLowerCase()==='tennis');
-          if(sfPlayers.length>0){
-            const sfId=sfPlayers[0].entity.id;
-            const[sfLast,sfNext]=await Promise.all([
-              fetch('https://api.sofascore.com/api/v1/player/'+sfId+'/events/last/0',600000,{'User-Agent':'Mozilla/5.0'}).catch(()=>null),
-              fetch('https://api.sofascore.com/api/v1/player/'+sfId+'/events/next/0',600000,{'User-Agent':'Mozilla/5.0'}).catch(()=>null),
-            ]);
-            for(const e of(sfLast?.events||[])){
-              const h=e.homeTeam||e.homeScore;
-              past.push({
-                idEvent:String(e.id),
-                strEvent:e.tournament?.name||e.roundInfo?.name||'',
-                strHomeTeam:e.homeTeam?.name||'',strAwayTeam:e.awayTeam?.name||'',
-                intHomeScore:e.homeScore?.current,intAwayScore:e.awayScore?.current,
-                dateEvent:e.startTimestamp?new Date(e.startTimestamp*1000).toISOString().split('T')[0]:'',
-                strLeague:e.tournament?.name||'Tennis',
-                strStatus:'Match Finished',
-              });
-            }
-            for(const e of(sfNext?.events||[])){
-              upcoming.push({
-                idEvent:String(e.id),
-                strEvent:e.tournament?.name||e.roundInfo?.name||'',
-                strHomeTeam:e.homeTeam?.name||'',strAwayTeam:e.awayTeam?.name||'',
-                dateEvent:e.startTimestamp?new Date(e.startTimestamp*1000).toISOString().split('T')[0]:'',
-                strLeague:e.tournament?.name||'Tennis',
-              });
-            }
+        const lastName=(playerName.split(' ').pop()||'').toLowerCase();
+        if(lastName.length>2){
+          const now=new Date();
+          const ranges=[
+            // Ultimi 60 giorni
+            [new Date(now-60*864e5),new Date(now)],
+            // Prossimi 60 giorni
+            [new Date(now),new Date(now.getTime()+60*864e5)],
+          ];
+          for(const [start,end] of ranges){
+            const from=start.toISOString().slice(0,10).replace(/-/g,'');
+            const to=end.toISOString().slice(0,10).replace(/-/g,'');
+            const isFuture=start>=now;
+            try{
+              for(const tour of['atp','wta']){
+                const d=await fetch(`${ESPN}/tennis/${tour}/scoreboard?dates=${from}-${to}`,600000).catch(()=>null);
+                for(const e of(d?.events||[])){
+                  const comp=(e.competitions||[])[0]||{};
+                  const comps=comp.competitors||[];
+                  const involved=comps.some(c=>(c.athlete?.displayName||c.team?.displayName||'').toLowerCase().includes(lastName));
+                  if(!involved)continue;
+                  const st=comp.status?.type||{};
+                  const completed=!!st.completed;
+                  const c1=comps[0],c2=comps[1];
+                  const ev={
+                    idEvent:String(e.id),
+                    strEvent:e.name||e.shortName||'',
+                    strHomeTeam:c1?.athlete?.displayName||c1?.team?.displayName||'',
+                    strAwayTeam:c2?.athlete?.displayName||c2?.team?.displayName||'',
+                    intHomeScore:c1?.score?.value||null,
+                    intAwayScore:c2?.score?.value||null,
+                    dateEvent:e.date?e.date.split('T')[0]:'',
+                    strLeague:e.leagues?.[0]?.name||'Tennis '+tour.toUpperCase(),
+                    strStatus:completed?'Match Finished':'Scheduled',
+                  };
+                  if(isFuture)upcoming.push(ev); else past.push(ev);
+                }
+              }
+            }catch{}
           }
         }
       }catch{}
@@ -1013,53 +1054,35 @@ function parseMotoGPWikitext(wt){
   return races;
 }
 
+// Calendario MotoGP 2026 hardcoded (Wikipedia bloccata da Render)
+const MOTOGP_2026=[
+  {round:1, strEvent:'Thai GP',       dateEvent:'2026-03-01',strVenue:'Chang International Circuit',           strCountry:'THA'},
+  {round:2, strEvent:'Brazilian GP',  dateEvent:'2026-03-22',strVenue:'Autódromo Internacional Ayrton Senna', strCountry:'BRA'},
+  {round:3, strEvent:'Americas GP',   dateEvent:'2026-03-29',strVenue:'Circuit of the Americas',               strCountry:'USA'},
+  {round:4, strEvent:'Qatar GP',      dateEvent:'2026-04-12',strVenue:'Lusail International Circuit',          strCountry:'QAT'},
+  {round:5, strEvent:'Spanish GP',    dateEvent:'2026-04-26',strVenue:'Circuito de Jerez – Ángel Nieto',       strCountry:'ESP'},
+  {round:6, strEvent:'French GP',     dateEvent:'2026-05-10',strVenue:'Bugatti Circuit',                       strCountry:'FRA'},
+  {round:7, strEvent:'Catalan GP',    dateEvent:'2026-05-17',strVenue:'Circuit de Barcelona-Catalunya',        strCountry:'CAT'},
+  {round:8, strEvent:'Italian GP',    dateEvent:'2026-05-31',strVenue:'Autodromo Internazionale del Mugello',  strCountry:'ITA'},
+  {round:9, strEvent:'German GP',     dateEvent:'2026-06-14',strVenue:'Sachsenring',                           strCountry:'GER'},
+  {round:10,strEvent:'Dutch GP',      dateEvent:'2026-06-28',strVenue:'TT Circuit Assen',                      strCountry:'NED'},
+  {round:11,strEvent:'Finnish GP',    dateEvent:'2026-07-05',strVenue:'KymiRing',                              strCountry:'FIN'},
+  {round:12,strEvent:'British GP',    dateEvent:'2026-07-26',strVenue:'Silverstone Circuit',                   strCountry:'GBR'},
+  {round:13,strEvent:'Austrian GP',   dateEvent:'2026-08-09',strVenue:'Red Bull Ring',                         strCountry:'AUT'},
+  {round:14,strEvent:'Czech GP',      dateEvent:'2026-08-16',strVenue:'Automotodrom Brno',                     strCountry:'CZE'},
+  {round:15,strEvent:'San Marino GP', dateEvent:'2026-09-06',strVenue:'Misano World Circuit',                  strCountry:'ITA'},
+  {round:16,strEvent:'Aragon GP',     dateEvent:'2026-09-20',strVenue:'MotorLand Aragon',                      strCountry:'ESP'},
+  {round:17,strEvent:'Japanese GP',   dateEvent:'2026-10-04',strVenue:'Twin Ring Motegi',                      strCountry:'JPN'},
+  {round:18,strEvent:'Australian GP', dateEvent:'2026-10-18',strVenue:'Phillip Island Grand Prix Circuit',     strCountry:'AUS'},
+  {round:19,strEvent:'Malaysian GP',  dateEvent:'2026-11-01',strVenue:'Sepang International Circuit',          strCountry:'MAS'},
+  {round:20,strEvent:'Valencian GP',  dateEvent:'2026-11-15',strVenue:'Circuit Ricardo Tormo',                 strCountry:'ESP'},
+].map(r=>({...r,strLeague:'MotoGP',idEvent:'moto2026_'+r.round}));
+
 app.get('/sport/motogp/calendar',async(req,res)=>{
-  try{
-    const now=new Date();
-    const year=now.getFullYear();
-    let allRaces=[];
-
-    // 1. Wikipedia API — calendario completo
-    try{
-      const wikiUrl=`https://en.wikipedia.org/w/api.php?action=query&titles=${year}_MotoGP_World_Championship&prop=revisions&rvprop=content&format=json&formatversion=2`;
-      // Usa chiave cache con anno per evitare conflitti
-      const wikiCk=`wiki_moto_${year}`;
-      let wiki=getC(wikiCk);
-      if(!wiki){
-        const wr=await axios.get(wikiUrl,{timeout:20000});
-        wiki=wr.data;
-        setC(wikiCk,wiki,1800000); // 30 min
-      }
-      const wt=wiki?.query?.pages?.[0]?.revisions?.[0]?.content||'';
-      if(wt.length>1000){
-        const parsed=parseMotoGPWikitext(wt);
-        allRaces=parsed;
-      }
-    }catch{}
-
-    // 2. TheSportsDB come supplemento date/info
-    const seen=new Set(allRaces.map(r=>r.strEvent?.toLowerCase().replace(/\s+/g,'')));
-    try{
-      const[p,n]=await Promise.all([
-        sdb('/eventspastleague.php?id=4407',1800000).catch(()=>null),
-        sdb('/eventsnextleague.php?id=4407',1800000).catch(()=>null),
-      ]);
-      for(const e of [...(p?.events||[]),...(n?.events||[])]){
-        const k=(e.strEvent||'').toLowerCase().replace(/\s+/g,'');
-        if(!seen.has(k)){seen.add(k);allRaces.push({
-          idEvent:String(e.idEvent),strEvent:e.strEvent||'',strLeague:'MotoGP',
-          dateEvent:e.dateEvent||'',strVenue:e.strVenue||'',strCountry:e.strCountry||'',round:0,
-        });}
-      }
-    }catch{}
-
-    // Separa passate/future e ordina
-    allRaces.sort((a,b)=>new Date(a.date||a.dateEvent||0)-new Date(b.date||b.dateEvent||0));
-    const past=allRaces.filter(r=>{const d=new Date(r.date||r.dateEvent||0);return d<now&&r.dateEvent;});
-    const upcoming=allRaces.filter(r=>{const d=new Date(r.date||r.dateEvent||0);return d>=now||!r.dateEvent;});
-
-    res.json({past,upcoming});
-  }catch(e){res.status(500).json({error:e.message});}
+  const now=new Date();
+  const past=MOTOGP_2026.filter(r=>new Date(r.dateEvent)<now);
+  const upcoming=MOTOGP_2026.filter(r=>new Date(r.dateEvent)>=now);
+  res.json({past,upcoming});
 });
 
 app.get('/sport/motogp/table',async(req,res)=>{
