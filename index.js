@@ -137,6 +137,29 @@ function parseScore(s){
   return(!isNaN(n)&&String(s).trim()!=='')?String(Math.round(n)):'';
 }
 
+// ─── Traduci status ESPN → italiano ─────────────────────────────────────────
+function translateStatus(st){
+  if(!st)return'';
+  const name=st.name||'';const desc=st.description||'';const detail=st.detail||'';
+  // Partita finita
+  if(name==='STATUS_FULL_TIME'||detail==='FT')return'Tempo Regolamentare';
+  if(name==='STATUS_EXTRA_TIME'||detail==='AET'||detail==='ET')return'Dopo i Supplementari';
+  if(name==='STATUS_PENALTY'||detail==='Pen'||detail==='PSO')return'Dopo i Rigori';
+  if(name==='STATUS_ABANDONED')return'Abbandonata';
+  if(name==='STATUS_POSTPONED')return'Rinviata';
+  if(name==='STATUS_SUSPENDED')return'Sospesa';
+  if(name==='STATUS_CANCELED')return'Annullata';
+  // In corso
+  if(name==='STATUS_IN_PROGRESS'||name==='STATUS_HALFTIME')return desc||'In Corso';
+  if(name==='STATUS_HALFTIME'||detail==='HT')return'Intervallo';
+  // Non iniziata
+  if(name==='STATUS_SCHEDULED'||name==='STATUS_UPCOMING')return'';
+  // Extra time
+  if(name.includes('EXTRA')||detail.includes('ET'))return'Supplementari';
+  if(name.includes('PENALTY')||detail.includes('Pen'))return'Rigori';
+  return '';
+}
+
 // ─── Normalizza evento ESPN ───────────────────────────────────────────────────
 function normEvent(e,leagueName,leagueSlug){
   try{
@@ -163,7 +186,9 @@ function normEvent(e,leagueName,leagueSlug){
       awayScore:completed?parseScore(away.score):'',
       homeId:String(home.team?.id||''),awayId:String(away.team?.id||''),
       completed,live:st.name==='STATUS_IN_PROGRESS',
-      clock:comp.status?.displayClock||'',round,
+      clock:comp.status?.displayClock||'',
+      round,
+      statusDetail:translateStatus(comp.status?.type),
     };
   }catch{return null;}
 }
@@ -186,11 +211,12 @@ function mapStage(s){
   if(fdMap[s])return fdMap[s];
   // ESPN text values (case-insensitive fuzzy)
   const lower=s.toLowerCase().trim();
-  if(lower==='final'||lower==='finale')return'Finale';
+  if(lower==='final'||lower==='finale'||lower==='final stage')return'Finale';
   if(lower.includes('semi'))return'Semifinale';
   if(lower.includes('quarter')||lower==='quarti di finale')return'Quarti di Finale';
-  if(lower==='last 16'||lower.includes('round of 16')||lower.includes('ottavi'))return'Ottavi di Finale';
-  if(lower==='last 32'||lower.includes('round of 32'))return'Sedicesimi di Finale';
+  if(lower==='last 16'||lower==='last_16'||lower.includes('round of 16')||lower.includes('ottavi'))return'Ottavi di Finale';
+  if(lower==='last 32'||lower==='last_32'||lower.includes('round of 32'))return'Sedicesimi di Finale';
+  if(lower==='last 64'||lower==='last_64'||lower.includes('round of 64'))return'Trentaduesimi';
   if(lower.includes('league stage')||lower.includes('group stage')||lower.includes('girone'))return'Fase a Gironi';
   if(lower.includes('playoff'))return'Playoff';
   if(lower.includes('qualifying'))return'Qualificazioni';
@@ -681,26 +707,63 @@ app.get('/sport/basketball/search',async(req,res)=>{
 });
 app.get('/sport/basketball/team/:league/:id/events',async(req,res)=>{
   try{
-    const{league,id}=req.params;const allEvents=[];const seen=new Set();
-    try{
-      const d=await fetch(`${ESPN}/basketball/${league}/teams/${id}/schedule`,3600000);
-      for(const e of(d?.events||[])){
-        if(!e||e.$ref)continue;
-        const ne=normEvent(e,league,league);if(!ne||!ne.completed||seen.has(ne.id))continue;
-        seen.add(ne.id);allEvents.push(ne);
-      }
-    }catch{}
+    const{league,id}=req.params;
+    const allEvents=[];const seen=new Set();
     const now=new Date();
-    const from=now.toISOString().slice(0,10).replace(/-/g,'');
+    const from=new Date(now.getTime()-120*864e5).toISOString().slice(0,10).replace(/-/g,'');
     const to=new Date(now.getTime()+90*864e5).toISOString().slice(0,10).replace(/-/g,'');
-    try{
-      const d=await fetch(`${ESPN}/basketball/${league}/scoreboard?dates=${from}-${to}`,300000);
-      for(const e of(d?.events||[])){
-        const ne=normEvent(e,league,league);if(!ne||seen.has(ne.id))continue;
-        if(ne.homeId!==id&&ne.awayId!==id)continue;
-        seen.add(ne.id);allEvents.push(ne);
-      }
-    }catch{}
+
+    // Se ID viene da TheSportsDB (sdb:XXXXX), usa SDB per eventi
+    if(id.startsWith('sdb:')){
+      const sdbId=id.replace('sdb:','');
+      try{
+        const[last,next]=await Promise.all([
+          sdb(`/eventslast.php?id=${sdbId}`,1800000).catch(()=>null),
+          sdb(`/eventsnext.php?id=${sdbId}`,1800000).catch(()=>null),
+        ]);
+        const past=(last?.results||last?.events||[]);
+        const upcoming=(next?.events||[]);
+        return res.json({events:[...past.map(e=>({
+          id:String(e.idEvent),date:e.dateEvent?e.dateEvent+'T'+e.strTime:e.dateEvent||'',
+          league:e.strLeague||'Basketball',leagueSlug:league,
+          homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
+          homeScore:e.intHomeScore!=null?String(e.intHomeScore):'',
+          awayScore:e.intAwayScore!=null?String(e.intAwayScore):'',
+          homeId:'',awayId:'',completed:!!e.intHomeScore||e.strStatus==='Match Finished',
+          live:false,clock:'',round:e.intRound?`Giornata ${e.intRound}`:'',
+        })),...upcoming.map(e=>({
+          id:String(e.idEvent),date:e.dateEvent?e.dateEvent+'T'+(e.strTime||'00:00:00'):e.dateEvent||'',
+          league:e.strLeague||'Basketball',leagueSlug:league,
+          homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
+          homeScore:'',awayScore:'',homeId:'',awayId:'',
+          completed:false,live:false,clock:'',round:e.intRound?`Giornata ${e.intRound}`:'',
+        }))]});
+      }catch{}
+      return res.json({events:[]});
+    }
+
+    // ID ESPN — usa schedule + scoreboard
+    for(const lg of BBALL_LEAGUES){
+      try{
+        const d=await fetch(`${ESPN}/basketball/${lg.slug}/teams/${id}/schedule`,3600000);
+        for(const e of(d?.events||[])){
+          if(!e||e.$ref)continue;
+          const ne=normEvent(e,lg.name,lg.slug);if(!ne||seen.has(ne.id))continue;
+          seen.add(ne.id);allEvents.push(ne);
+        }
+      }catch{}
+    }
+    // Scoreboard future per ogni lega
+    for(const lg of BBALL_LEAGUES){
+      try{
+        const d=await fetch(`${ESPN}/basketball/${lg.slug}/scoreboard?dates=${from}-${to}`,300000);
+        for(const e of(d?.events||[])){
+          const ne=normEvent(e,lg.name,lg.slug);if(!ne||seen.has(ne.id))continue;
+          if(ne.homeId!==id&&ne.awayId!==id)continue;
+          seen.add(ne.id);allEvents.push(ne);
+        }
+      }catch{}
+    }
     allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
     res.json({events:allEvents});
   }catch(e){res.status(500).json({error:e.message});}
@@ -764,37 +827,46 @@ app.get('/sport/tennis/player/:id/events',async(req,res)=>{
       }catch{}
     }
 
-    // Se ancora vuoto, usa ESPN tennis schedule per il torneo corrente
-    // Cerca il giocatore per nome nel ranking e poi nei tornei
+    // Se ancora vuoto, prova SofaScore (API pubblica non-auth, dati tennis completi)
     if(!past.length&&!upcoming.length){
       try{
-        // Prova ATP schedule ESPN — tornei recenti/prossimi
-        const now=new Date();
-        const from=new Date(now.getTime()-30*864e5).toISOString().slice(0,10).replace(/-/g,'');
-        const to=new Date(now.getTime()+60*864e5).toISOString().slice(0,10).replace(/-/g,'');
-        const d=await fetch(`${ESPN}/tennis/atp/scoreboard?dates=${from}-${to}`,600000).catch(()=>null);
-        if(d?.events?.length){
-          // Filtra eventi che coinvolgono il giocatore cercando il nome nel ranking
-          const playerInfo=await sdb(`/lookupplayer.php?id=${id}`,86400000).catch(()=>null);
-          const playerName=(playerInfo?.players||playerInfo?.player||[])[0]?.strPlayer||'';
-          const nameParts=playerName.toLowerCase().split(' ');
-          for(const e of(d.events||[])){
-            const comps=(e.competitions||[])[0]?.competitors||[];
-            const involved=comps.some(c=>{
-              const an=(c.athlete?.displayName||c.team?.displayName||'').toLowerCase();
-              return nameParts.some(p=>p.length>3&&an.includes(p));
-            });
-            if(!involved)continue;
-            const comp=(e.competitions||[])[0]||{};
-            const st=comp.status?.type||{};
-            const completed=!!st.completed;
-            const ev={
-              idEvent:String(e.id),strEvent:e.name||e.shortName||'',
-              dateEvent:e.date?e.date.split('T')[0]:'',strTime:e.date||'',
-              strStatus:completed?'Match Finished':'',
-              strLeague:'ATP',
-            };
-            if(completed)past.push(ev);else upcoming.push(ev);
+        // SofaScore player search per nome → poi eventi
+        const playerInfo=await sdb('/lookupplayer.php?id='+id,86400000).catch(()=>null);
+        const playerName=(playerInfo?.players||playerInfo?.player||[])[0]?.strPlayer||'';
+        if(playerName){
+          // Cerca player ID su SofaScore
+          const sfSearch=await fetch(
+            'https://api.sofascore.com/api/v1/search/all?q='+encodeURIComponent(playerName)+'&page=0',
+            1800000,{'User-Agent':'Mozilla/5.0','Accept':'application/json'}
+          ).catch(()=>null);
+          const sfPlayers=(sfSearch?.results||[]).filter(r=>r.type==='athlete'&&(r.entity?.sport?.name||'').toLowerCase()==='tennis');
+          if(sfPlayers.length>0){
+            const sfId=sfPlayers[0].entity.id;
+            const[sfLast,sfNext]=await Promise.all([
+              fetch('https://api.sofascore.com/api/v1/player/'+sfId+'/events/last/0',600000,{'User-Agent':'Mozilla/5.0'}).catch(()=>null),
+              fetch('https://api.sofascore.com/api/v1/player/'+sfId+'/events/next/0',600000,{'User-Agent':'Mozilla/5.0'}).catch(()=>null),
+            ]);
+            for(const e of(sfLast?.events||[])){
+              const h=e.homeTeam||e.homeScore;
+              past.push({
+                idEvent:String(e.id),
+                strEvent:e.tournament?.name||e.roundInfo?.name||'',
+                strHomeTeam:e.homeTeam?.name||'',strAwayTeam:e.awayTeam?.name||'',
+                intHomeScore:e.homeScore?.current,intAwayScore:e.awayScore?.current,
+                dateEvent:e.startTimestamp?new Date(e.startTimestamp*1000).toISOString().split('T')[0]:'',
+                strLeague:e.tournament?.name||'Tennis',
+                strStatus:'Match Finished',
+              });
+            }
+            for(const e of(sfNext?.events||[])){
+              upcoming.push({
+                idEvent:String(e.id),
+                strEvent:e.tournament?.name||e.roundInfo?.name||'',
+                strHomeTeam:e.homeTeam?.name||'',strAwayTeam:e.awayTeam?.name||'',
+                dateEvent:e.startTimestamp?new Date(e.startTimestamp*1000).toISOString().split('T')[0]:'',
+                strLeague:e.tournament?.name||'Tennis',
+              });
+            }
           }
         }
       }catch{}
@@ -949,10 +1021,15 @@ app.get('/sport/motogp/calendar',async(req,res)=>{
 
     // 1. Wikipedia API — calendario completo
     try{
-      const wiki=await fetch(
-        `https://en.wikipedia.org/w/api.php?action=query&titles=${year}_MotoGP_World_Championship&prop=revisions&rvprop=content&format=json&formatversion=2`,
-        1800000 // 30 min cache
-      );
+      const wikiUrl=`https://en.wikipedia.org/w/api.php?action=query&titles=${year}_MotoGP_World_Championship&prop=revisions&rvprop=content&format=json&formatversion=2`;
+      // Usa chiave cache con anno per evitare conflitti
+      const wikiCk=`wiki_moto_${year}`;
+      let wiki=getC(wikiCk);
+      if(!wiki){
+        const wr=await axios.get(wikiUrl,{timeout:20000});
+        wiki=wr.data;
+        setC(wikiCk,wiki,1800000); // 30 min
+      }
       const wt=wiki?.query?.pages?.[0]?.revisions?.[0]?.content||'';
       if(wt.length>1000){
         const parsed=parseMotoGPWikitext(wt);
