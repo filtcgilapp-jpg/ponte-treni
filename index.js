@@ -250,6 +250,31 @@ function mapStage(s){
 // ─── Mappa fase ESPN → italiano ───────────────────────────────────────────────
 function mapPhaseESPN(raw){ return mapStage(raw); }
 
+// Classifica fase UEFA per data (per EL/Conference dove ESPN/FD non fornisce round)
+function mapPhaseByDate(dateStr, slug){
+  if(!dateStr) return 'Partite';
+  const d=new Date(dateStr);
+  const m=d.getMonth()+1; // 1-12
+  const day=d.getDate();
+  const yr=d.getFullYear();
+  
+  // Stagione europea: agosto-maggio
+  // CL/EL/UECL 2024-25 e 2025-26
+  if(m>=8 && m<=10) return 'Fase Leghe';           // ago-ott: gironi/fase leghe
+  if(m===11) return 'Fase Leghe';                   // nov: ancora fase leghe
+  if(m===12) return 'Fase Leghe';                   // dic: ultima giornata fase leghe
+  if(m===1) return 'Playoff';                        // gen: playoff (andata)
+  if(m===2) return 'Playoff';                        // feb: playoff (ritorno) + sorteggi
+  if(m===3 && day<=20) return 'Ottavi di Finale';   // mar prima metà: ottavi andata
+  if(m===3 && day>20) return 'Ottavi di Finale';    // mar seconda metà: ottavi ritorno
+  if(m===4 && day<=17) return 'Quarti di Finale';   // apr prima metà: quarti
+  if(m===4 && day>17) return 'Semifinale';          // apr seconda metà: semifinali
+  if(m===5 && day<=25) return 'Semifinale';         // mag prima: semifinali ritorno
+  if(m===5 && day>25) return 'Finale';              // mag fine: finale
+  if(m===6) return 'Finale';                        // giu: finale (raro)
+  return 'Partite';
+}
+
 // ── HEALTH ────────────────────────────────────────────────────────────────────
 app.get('/',(req,res)=>res.send('OK '+new Date().toISOString()));
 app.get('/cache/clear',async(req,res)=>{
@@ -1413,6 +1438,8 @@ app.get('/sport/soccer/cups',async(req,res)=>{
             else if(rd.includes('playoff'))round='Playoff';
             else if(rd.includes('qualifying'))round='Qualificazioni';
             else if(e.strRound)round=`Giornata ${e.strRound}`;
+            // Se round ancora vuoto, classifica per data
+            if(!round) round=mapPhaseByDate(e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',lg.slug);
             events.push({
               id:eid,date:e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',
               league:lg.name,leagueSlug:lg.slug,
@@ -1471,12 +1498,57 @@ app.get('/sport/soccer/cups',async(req,res)=>{
               if(isGeneric||(stageByTeam&&stageByTeam!==e.round)){
                 e.round=stageByTeam||stageByDate||e.round||'';
               }
+              // Fallback finale: classifica per data se ancora vuoto o generico
+              if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'){
+                e.round=mapPhaseByDate(e.date,lg.slug);
+              }
             }
           }
         }catch{}
       }
       if(events.length===0)continue;
       events.sort((a,b)=>new Date(a.date)-new Date(b.date));
+      // Per coppe nazionali senza round: stima fase dal numero partite rimaste
+      // (più partite = turno iniziale, meno = finale)
+      const isCoppaEuropea=lg.slug==='uefa.champions'||lg.slug==='uefa.europa'||lg.slug==='uefa.conference';
+      const isCoppaNazionale=!isCoppaEuropea&&lg.isCup;
+      if(isCoppaNazionale){
+        // Raggruppa per data per capire i turni
+        const dateGroups=new Map();
+        for(const e of events){
+          const wk=e.date?e.date.slice(0,7):''; // YYYY-MM
+          if(!dateGroups.has(wk))dateGroups.set(wk,[]);
+          dateGroups.get(wk).push(e);
+        }
+        // Ordina i gruppi di date
+        const sortedWks=[...dateGroups.keys()].sort();
+        const totalGroups=sortedWks.length;
+        sortedWks.forEach((wk,i)=>{
+          const grpEvs=dateGroups.get(wk);
+          const cnt=grpEvs.length;
+          // Stima fase dal numero partite e posizione nella stagione
+          let phase='';
+          if(!phase){
+            // Usa già il round se disponibile
+            const existingRound=grpEvs.find(e=>e.round&&e.round!=='Partite')?.round;
+            if(existingRound) phase=existingRound;
+          }
+          if(!phase){
+            if(cnt>=32) phase='Turno Preliminare';
+            else if(cnt>=16) phase='Sedicesimi di Finale';
+            else if(cnt>=8) phase='Ottavi di Finale';
+            else if(cnt>=4) phase='Quarti di Finale';
+            else if(cnt>=2) phase='Semifinale';
+            else if(cnt===1) phase='Finale';
+            else phase='Turno';
+          }
+          // Assegna la fase agli eventi del gruppo se non hanno round
+          for(const e of grpEvs){
+            if(!e.round||e.round==='Partite') e.round=phase;
+          }
+        });
+      }
+
       const phaseMap=new Map();
       for(const e of events){
         // Normalizza round: se ESPN usa "X advance N-M on penalties" → assegna a fase appropriata
