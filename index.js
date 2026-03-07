@@ -1082,31 +1082,198 @@ app.get('/sport/tennis/ranking/:type',async(req,res)=>{
 // F1
 // ══════════════════════════════════════════════════════════════════════════════
 const F1Y=new Date().getFullYear();
+
+// ── OpenF1 helper (live + recenti, nessuna auth) ─────────────────────────────
+async function openf1(path,ttl=60000){
+  const r=await axios.get('https://api.openf1.org/v1'+path,{timeout:15000});
+  return r.data;
+}
+
+// ── F1 Calendario (Jolpica/Ergast, fallback OpenF1 sessions) ─────────────────
 app.get('/sport/f1/calendar',async(req,res)=>{
   try{
-    const cal=await ergast(`/${F1Y}`);
-    const races=cal?.MRData?.RaceTable?.Races||[];
     const now=new Date();
-    // Per le gare passate, aggiungi risultati (top 3)
+    // Prova Jolpica per anno corrente
+    let races=[];
+    try{
+      const cal=await ergast(`/${F1Y}`);
+      races=cal?.MRData?.RaceTable?.Races||[];
+    }catch{}
+
+    // Se Jolpica non ha dati 2026, costruiamo da OpenF1 meetings
+    if(races.length===0){
+      try{
+        const meetings=await openf1(`/meetings?year=${F1Y}`,3600000);
+        races=(meetings||[]).filter(m=>m.circuit_short_name).map(m=>({
+          round:m.meeting_key,
+          raceName:m.meeting_name,
+          date:m.date_start?m.date_start.slice(0,10):'',
+          time:m.date_start?m.date_start.slice(11):'',
+          Circuit:{circuitName:m.circuit_short_name,Location:{country:m.country_name,locality:m.location}},
+          _openf1_key:m.meeting_key,
+        }));
+        races.sort((a,b)=>new Date(a.date)-new Date(b.date));
+      }catch{}
+    }
+
+    // Risultati gare passate (Jolpica prima, poi OpenF1)
     await Promise.all(races.map(async(race)=>{
       const raceDate=new Date(race.date);
-      if(raceDate<now){
-        try{
+      if(raceDate>=now) return;
+      try{
+        if(race.round&&!race._openf1_key){
           const r=await ergast(`/${F1Y}/${race.round}/results`);
           race.Results=(r?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,3);
-        }catch{}
-      }
+        } else {
+          // OpenF1: risultati gara da position data
+          const key=race._openf1_key||race.round;
+          const pos=await openf1(`/position?meeting_key=${key}&position<=3`,300000);
+          if(pos&&pos.length>0){
+            // Raggruppa per driver e prendi posizione finale
+            const finals={};
+            for(const p of pos){if(!finals[p.driver_number]||p.date>finals[p.driver_number].date) finals[p.driver_number]=p;}
+            const top3=Object.values(finals).filter(p=>p.position<=3).sort((a,b)=>a.position-b.position);
+            // Nomi piloti da drivers endpoint
+            const drvs=await openf1(`/drivers?meeting_key=${key}`,3600000).catch(()=>[]);
+            race.Results=top3.map(p=>{
+              const d=drvs.find(dr=>dr.driver_number===p.driver_number)||{};
+              return{position:String(p.position),Driver:{familyName:d.last_name||String(p.driver_number),givenName:d.first_name||''},Constructor:{name:d.team_name||''}};
+            });
+          }
+        }
+      }catch{}
     }));
-    res.json(cal);
+    res.json({MRData:{RaceTable:{Races:races}}});
   }catch(e){res.status(500).json({error:e.message});}
 });
+
+// ── F1 Classifica Piloti ──────────────────────────────────────────────────────
 app.get('/sport/f1/drivers',async(req,res)=>{
-  try{for(const y of[F1Y,F1Y-1]){const d=await ergast(`/${y}/driverStandings`).catch(()=>null);if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.length>0)return res.json(d);}res.status(500).json({error:'Non disponibile'});}catch(e){res.status(500).json({error:e.message});}
+  try{
+    // 1. Jolpica anno corrente
+    for(const y of[F1Y,F1Y-1]){
+      const d=await ergast(`/${y}/driverStandings`).catch(()=>null);
+      if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.length>0) return res.json(d);
+    }
+    // 2. OpenF1: costruiamo classifica da stints/risultati disponibili
+    // OpenF1 non ha standings diretti, usiamo ESPN come fallback
+    const espn=await axios.get('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings',{timeout:10000}).catch(()=>null);
+    if(espn?.data){
+      const cats=espn.data.standings||[];
+      for(const cat of cats){
+        const entries=cat.entries||[];
+        if(entries.length>0){
+          const list=entries.map((e,i)=>({
+            position:String(i+1),
+            points:String(e.stats?.find(s=>s.name==='points')?.value||0),
+            wins:String(e.stats?.find(s=>s.name==='wins')?.value||0),
+            Driver:{givenName:e.athlete?.firstName||'',familyName:e.athlete?.lastName||'',nationality:e.athlete?.flag?.alt||''},
+            Constructors:[{name:e.team?.displayName||''}],
+          }));
+          return res.json({MRData:{StandingsTable:{StandingsLists:[{DriverStandings:list}]}}});
+        }
+      }
+    }
+    res.status(500).json({error:'Dati non disponibili'});
+  }catch(e){res.status(500).json({error:e.message});}
 });
+
+// ── F1 Classifica Costruttori ─────────────────────────────────────────────────
 app.get('/sport/f1/constructors',async(req,res)=>{
-  try{for(const y of[F1Y,F1Y-1]){const d=await ergast(`/${y}/constructorStandings`).catch(()=>null);if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings?.length>0)return res.json(d);}res.status(500).json({error:'Non disponibile'});}catch(e){res.status(500).json({error:e.message});}
+  try{
+    for(const y of[F1Y,F1Y-1]){
+      const d=await ergast(`/${y}/constructorStandings`).catch(()=>null);
+      if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings?.length>0) return res.json(d);
+    }
+    const espn=await axios.get('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings?type=constructor',{timeout:10000}).catch(()=>null);
+    if(espn?.data){
+      const cats=espn.data.standings||[];
+      for(const cat of cats){
+        const entries=cat.entries||[];
+        if(entries.length>0){
+          const list=entries.map((e,i)=>({
+            position:String(i+1),
+            points:String(e.stats?.find(s=>s.name==='points')?.value||0),
+            wins:String(e.stats?.find(s=>s.name==='wins')?.value||0),
+            Constructor:{name:e.team?.displayName||'',nationality:''},
+          }));
+          return res.json({MRData:{StandingsTable:{StandingsLists:[{ConstructorStandings:list}]}}});
+        }
+      }
+    }
+    res.status(500).json({error:'Dati non disponibili'});
+  }catch(e){res.status(500).json({error:e.message});}
 });
-app.get('/sport/f1/last',async(req,res)=>{try{res.json(await ergast('/current/last/results',3600000));}catch(e){res.status(500).json({error:e.message});}});
+
+// ── F1 Ultima gara ────────────────────────────────────────────────────────────
+app.get('/sport/f1/last',async(req,res)=>{
+  try{
+    // Jolpica
+    const d=await ergast('/current/last/results',300000).catch(()=>null);
+    if(d?.MRData?.RaceTable?.Races?.[0]?.Results?.length>0) return res.json(d);
+
+    // OpenF1: ultima sessione di tipo Race
+    const sessions=await openf1(`/sessions?session_name=Race&year=${F1Y}`,300000);
+    if(!sessions||sessions.length===0) return res.status(404).json({error:'Nessuna gara'});
+    const last=sessions.filter(s=>new Date(s.date_end)<new Date()).sort((a,b)=>new Date(b.date_end)-new Date(a.date_end))[0];
+    if(!last) return res.status(404).json({error:'Nessuna gara passata'});
+
+    // Posizioni finali
+    const [posArr,drvArr]=await Promise.all([
+      openf1(`/position?session_key=${last.session_key}`,300000),
+      openf1(`/drivers?session_key=${last.session_key}`,3600000),
+    ]);
+    // Ultima posizione per ogni pilota
+    const finals={};
+    for(const p of (posArr||[])){if(!finals[p.driver_number]||p.date>finals[p.driver_number].date) finals[p.driver_number]=p;}
+    const sorted=Object.values(finals).sort((a,b)=>a.position-b.position);
+    const Results=sorted.map(p=>{
+      const d=(drvArr||[]).find(dr=>dr.driver_number===p.driver_number)||{};
+      return{
+        position:String(p.position),
+        Driver:{givenName:d.first_name||'',familyName:d.last_name||String(p.driver_number),nationality:d.country_code||''},
+        Constructor:{name:d.team_name||''},
+        points:'',Time:{time:''},status:'Classified',
+      };
+    });
+    res.json({MRData:{RaceTable:{Races:[{
+      raceName:last.meeting_name||last.session_name,
+      date:last.date_start?last.date_start.slice(0,10):'',
+      Circuit:{circuitName:last.circuit_short_name||'',Location:{country:last.country_name||''}},
+      Results,
+    }]}}});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── F1 Live (sessione corrente) ───────────────────────────────────────────────
+app.get('/sport/f1/live',async(req,res)=>{
+  try{
+    // Ultima sessione (può essere live)
+    const sessions=await openf1('/sessions?session_key=latest',30000);
+    if(!sessions||sessions.length===0) return res.json({live:false});
+    const sess=sessions[0];
+    const now=new Date();
+    const start=new Date(sess.date_start);
+    const end=new Date(sess.date_end);
+    const isLive=now>=start&&now<=end;
+
+    if(!isLive) return res.json({live:false,session:sess.session_name,meeting:sess.meeting_name});
+
+    // Posizioni live
+    const [posArr,drvArr]=await Promise.all([
+      openf1('/position?session_key=latest',5000),
+      openf1(`/drivers?session_key=${sess.session_key}`,3600000),
+    ]);
+    const finals={};
+    for(const p of (posArr||[])){if(!finals[p.driver_number]||p.date>finals[p.driver_number].date) finals[p.driver_number]=p;}
+    const sorted=Object.values(finals).sort((a,b)=>a.position-b.position);
+    const positions=sorted.map(p=>{
+      const d=(drvArr||[]).find(dr=>dr.driver_number===p.driver_number)||{};
+      return{pos:p.position,num:p.driver_number,name:`${d.first_name||''} ${d.last_name||p.driver_number}`.trim(),team:d.team_name||'',abbr:d.name_acronym||''};
+    });
+    res.json({live:true,session:sess.session_name,meeting:sess.meeting_name,positions});
+  }catch(e){res.status(500).json({error:e.message});}
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MOTOGP — Wikipedia API (calendario completo) + TheSportsDB (supplemento)
@@ -1241,39 +1408,107 @@ app.get('/sport/motogp/calendar',async(req,res)=>{
 app.get('/sport/motogp/table',async(req,res)=>{
   try{
     const y=new Date().getFullYear();
-    // TheSportsDB — anni in ordine decrescente
-    for(const s of[`${y}`,`${y-1}`,`${y-2}`]){
+    // 1. ESPN MotoGP standings (source più aggiornata)
+    try{
+      const d=await axios.get(`https://site.web.api.espn.com/apis/v2/sports/racing/motogp/standings`,{timeout:10000});
+      const entries=(d.data?.standings?.[0]?.entries||d.data?.entries||[]);
+      if(entries.length>0){
+        return res.json({table:entries.map((e,i)=>({
+          intRank:String(i+1),
+          strTeam:e.athlete?.displayName||e.athlete?.shortName||e.team?.displayName||'',
+          intPoints:String(e.stats?.find(s=>s.name==='points')?.value??e.points??0),
+          intPlayed:String(e.stats?.find(s=>s.name==='starts')?.value??e.starts??0),
+        })),season:String(y)});
+      }
+    }catch{}
+    // 2. TheSportsDB fallback
+    for(const s of[`${y}`,`${y-1}`]){
       try{
         const d=await sdb(`/lookuptable.php?l=4407&s=${s}`,3600000);
         if(d?.table?.length>0)return res.json({table:d.table,season:s});
       }catch{}
     }
-    // ESPN standings motogp
+    res.json({table:[],error:'Nessun dato classifica MotoGP'});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── MotoGP Ultima gara (risultati) ───────────────────────────────────────────
+app.get('/sport/motogp/last',async(req,res)=>{
+  try{
+    const y=new Date().getFullYear();
+    const now=new Date();
+    // Cerca ultima gara passata nel calendario
+    const past=MOTOGP_2026.filter(r=>new Date(r.dateEvent)<now).sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent));
+    if(past.length===0) return res.json({race:null,results:[]});
+    const lastRace=past[0];
+
+    // ESPN MotoGP results per evento
+    // Proviamo a cercare risultati dall'ESPN scoreboard
     try{
-      const d=await fetch(`${ESPN}/racing/motogp/standings`,3600000);
-      const entries=d?.standings?.[0]?.entries||d?.entries||[];
-      if(entries.length>0){
-        return res.json({table:entries.map((e,i)=>({
-          intRank:String(i+1),strTeam:e.athlete?.displayName||e.team?.displayName||'',
-          intPoints:String(e.points||0),intPlayed:String(e.starts||0),
-        }))});
+      const dateStr=lastRace.dateEvent.replace(/-/g,'');
+      const d=await axios.get(
+        `https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${dateStr}`,
+        {timeout:10000}
+      );
+      const events=d.data?.events||[];
+      for(const ev of events){
+        const comps=ev.competitions?.[0]?.competitors||[];
+        if(comps.length>0){
+          const results=comps
+            .sort((a,b)=>(a.order||99)-(b.order||99))
+            .slice(0,20)
+            .map(c=>({
+              position:String(c.order||0),
+              name:c.athlete?.displayName||c.team?.displayName||'',
+              abbr:c.athlete?.shortName||'',
+              team:c.team?.name||'',
+              points:String(c.score||''),
+            }));
+          return res.json({race:lastRace,results});
+        }
       }
     }catch{}
-    res.json({table:[]});
+    // Fallback: restituiamo almeno i dati gara senza risultati
+    res.json({race:lastRace,results:[]});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── MotoGP Live ───────────────────────────────────────────────────────────────
+app.get('/sport/motogp/live',async(req,res)=>{
+  try{
+    const now=new Date();
+    // Gara in corso? (±3h dalla data evento)
+    const live=MOTOGP_2026.find(r=>{
+      const d=new Date(r.dateEvent+'T12:00:00Z');
+      return Math.abs(now-d)<3*3600000;
+    });
+    if(!live) return res.json({live:false});
+    // ESPN live scoreboard
+    try{
+      const dateStr=live.dateEvent.replace(/-/g,'');
+      const d=await axios.get(
+        `https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${dateStr}`,
+        {timeout:8000}
+      );
+      const comps=d.data?.events?.[0]?.competitions?.[0]?.competitors||[];
+      const positions=comps.sort((a,b)=>(a.order||99)-(b.order||99)).map(c=>({
+        pos:c.order,name:c.athlete?.displayName||'',team:c.team?.name||'',
+      }));
+      return res.json({live:true,race:live.strEvent,positions});
+    }catch{}
+    res.json({live:true,race:live.strEvent,positions:[]});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
 // ── CLASSIFICHE GENERALI — tutte le leghe principali ─────────────────────────
 app.get('/sport/soccer/standings/all',async(req,res)=>{
   const leagues=[
-    {slug:'ita.1',name:'Serie A'},
-    {slug:'ita.2',name:'Serie B'},
-    {slug:'uefa.champions',name:'Champions League'},
-    {slug:'uefa.europa',name:'Europa League'},
-    {slug:'esp.1',name:'La Liga'},
-    {slug:'eng.1',name:'Premier League'},
-    {slug:'ger.1',name:'Bundesliga'},
-    {slug:'fra.1',name:'Ligue 1'},
+    {slug:'ita.1',name:'Serie A',        flag:'IT'},
+    {slug:'ita.2',name:'Serie B',        flag:'IT'},
+    {slug:'esp.1',name:'La Liga',        flag:'ES'},
+    {slug:'eng.1',name:'Premier League', flag:'GB'},
+    {slug:'ger.1',name:'Bundesliga',     flag:'DE'},
+    {slug:'fra.1',name:'Ligue 1',        flag:'FR'},
   ];
   const results=await Promise.all(leagues.map(async(lg)=>{
     try{
@@ -1296,7 +1531,7 @@ app.get('/sport/soccer/standings/all',async(req,res)=>{
       }
       if(!entries.length)return null;
       return{
-        slug:lg.slug,name:lg.name,
+        slug:lg.slug,name:lg.name,flag:lg.flag||'',
         standings:entries.map((e,i)=>{
           const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
           return{
@@ -1350,7 +1585,7 @@ app.get('/sport/basketball/standings/all',async(req,res)=>{
       }
       if(!entries.length)return null;
       return{
-        slug:lg.slug,name:lg.name,
+        slug:lg.slug,name:lg.name,flag:lg.flag||'',
         standings:entries.map((e,i)=>{
           const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
           return{
