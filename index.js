@@ -38,18 +38,73 @@ async function ergast(path,ttl=3600000){
 }
 
 const SOCCER_LEAGUES=[
-  {slug:'ita.1',          name:'Serie A',          fd:'SA',  fdCupId:null},
-  {slug:'uefa.champions', name:'Champions League',  fd:'CL',  fdCupId:null},
-  {slug:'esp.1',          name:'La Liga',           fd:'PD',  fdCupId:null},
-  {slug:'eng.1',          name:'Premier League',    fd:'PL',  fdCupId:null},
-  {slug:'ger.1',          name:'Bundesliga',        fd:'BL1', fdCupId:null},
-  {slug:'fra.1',          name:'Ligue 1',           fd:'FL1', fdCupId:null},
-  {slug:'ita.coppa_italia',name:'Coppa Italia',     fd:null,  fdCupId:null},
-  {slug:'uefa.europa',    name:'Europa League',     fd:'EL',  fdCupId:null},
+  // Campionati
+  {slug:'ita.1',              name:'Serie A',              fd:'SA',  isCup:false},
+  {slug:'esp.1',              name:'La Liga',              fd:'PD',  isCup:false},
+  {slug:'eng.1',              name:'Premier League',       fd:'PL',  isCup:false},
+  {slug:'ger.1',              name:'Bundesliga',           fd:'BL1', isCup:false},
+  {slug:'fra.1',              name:'Ligue 1',              fd:'FL1', isCup:false},
+  // Coppe europee
+  {slug:'uefa.champions',     name:'Champions League',     fd:'CL',  isCup:true},
+  {slug:'uefa.europa',        name:'Europa League',        fd:'EL',  isCup:true},
+  {slug:'uefa.conference',    name:'Conference League',    fd:'ECSL',isCup:true},
+  // Coppe nazionali
+  {slug:'ita.coppa_italia',   name:'Coppa Italia',         fd:null,  isCup:true},
+  {slug:'esp.copa_del_rey',   name:'Copa del Rey',         fd:null,  isCup:true},
+  {slug:'eng.fa',             name:'FA Cup',               fd:'FAC', isCup:true},
+  {slug:'ger.dfb_pokal',      name:'DFB Pokal',            fd:'DFB', isCup:true},
+  {slug:'fra.coupe_de_france',name:'Coppa di Francia',     fd:null,  isCup:true},
 ];
 
 // Mappa football-data team ID ↔ ESPN team ID (popolata dinamicamente)
 const fdIdCache = new Map(); // espnId → fdId
+
+// Mappa NOME (lowercase, normalizzato) → FD team ID
+// Dati confermati da football-data.org /v4/competitions/SA/teams
+const FD_NAME_MAP = {
+  // Serie A
+  'milan':98,'ac milan':98,'acmilan':98,
+  'fiorentina':99,'acf fiorentina':99,
+  'roma':100,'as roma':100,
+  'atalanta':102,'atalanta bc':102,
+  'bologna':103,'bologna fc':103,
+  'cagliari':104,'cagliari calcio':104,
+  'genoa':107,'genoa cfc':107,
+  'inter':108,'internazionale':108,'inter milan':108,'fc internazionale':108,
+  'juventus':109,'juventus fc':109,
+  'lazio':110,'ss lazio':110,
+  'parma':112,'parma calcio':112,
+  'napoli':113,'ssc napoli':113,
+  'udinese':115,'udinese calcio':115,
+  'verona':450,'hellas verona':450,
+  'torino':586,'torino fc':586,
+  'lecce':5890,'us lecce':5890,
+  'como':7397,'como 1907':7397,
+  // Champions + altre
+  'real madrid':86,'real':86,
+  'barcelona':81,'fc barcelona':81,
+  'atletico madrid':78,'atletico':78,
+  'manchester city':65,'man city':65,
+  'manchester united':66,'man united':66,
+  'liverpool':64,
+  'chelsea':61,
+  'arsenal':57,
+  'tottenham':73,'tottenham hotspur':73,'spurs':73,
+  'bayern munich':5,'bayern':5,'fc bayern':5,
+  'borussia dortmund':4,'dortmund':4,
+  'psg':524,'paris saint-germain':524,'paris sg':524,
+  'porto':4284,
+  'benfica':1903,
+  'ajax':610,
+  'bayer leverkusen':3,
+  'rb leipzig':721,'red bull leipzig':721,
+};
+
+function normName(n){
+  return (n||'').toLowerCase()
+    .replace(/(fc|cf|sc|ac|as|ssc|us|rc|afc|cd|real)/g,'')
+    .replace(/\s+/g,' ').trim();
+}
 
 // ─── Score parsing ────────────────────────────────────────────────────────────
 function parseScore(s){
@@ -204,21 +259,29 @@ app.get('/sport/soccer/search',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// Trova ID football-data da nome squadra
+// Trova ID football-data da nome squadra — usa name map hardcoded + fallback API
 async function getFdTeamId(espnId, teamName){
-  if(fdIdCache.has(espnId))return fdIdCache.get(espnId);
-  // Cerca nelle competizioni che supportiamo
+  if(fdIdCache.has(String(espnId)))return fdIdCache.get(String(espnId));
+  // Prima cerca nel name map hardcoded (istantaneo, preciso)
+  const norm=normName(teamName);
+  const words=norm.split(' ').filter(w=>w.length>2);
+  // Match esatto
+  if(FD_NAME_MAP[norm]){fdIdCache.set(String(espnId),FD_NAME_MAP[norm]);return FD_NAME_MAP[norm];}
+  // Match parziale — cerca se la chiave contiene una parola del nome
+  for(const [k,v] of Object.entries(FD_NAME_MAP)){
+    if(words.some(w=>k.includes(w)||w.includes(k.split(' ')[0]))){
+      fdIdCache.set(String(espnId),v);return v;
+    }
+  }
+  // Fallback: API football-data
   const comps=['SA','CL','PD','PL','BL1','FL1','EL'];
   for(const comp of comps){
     try{
-      const d=await fd(`/competitions/${comp}/teams`,86400000);
+      const d=await fd('/competitions/'+comp+'/teams',86400000);
       for(const t of(d?.teams||[])){
-        const n=(t.name||'').toLowerCase();
-        const sn=(t.shortName||'').toLowerCase();
-        const q=teamName.toLowerCase().replace(/\s*(fc|cf|sc|ac|as|ssc)\s*/gi,'').trim();
-        if(n.includes(q)||sn.includes(q)||q.includes(sn.split(' ')[0])){
-          fdIdCache.set(espnId,t.id);
-          return t.id;
+        const tn=normName(t.name);const ts=normName(t.shortName);
+        if(words.some(w=>tn.includes(w)||ts.includes(w))){
+          fdIdCache.set(String(espnId),t.id);return t.id;
         }
       }
     }catch{}
@@ -271,11 +334,28 @@ app.get('/sport/soccer/team/:id/leagues',async(req,res)=>{
     await Promise.all(SOCCER_LEAGUES.map(async(lg)=>{
       try{
         const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/schedule`,3600000);
-        if((d?.events||[]).some(e=>e&&!e.$ref))map.set(lg.slug,{slug:lg.slug,name:lg.name});
+        if((d?.events||[]).some(e=>e&&!e.$ref)){
+          map.set(lg.slug,{slug:lg.slug,name:lg.name,isCup:lg.isCup||false});
+          return;
+        }
       }catch{}
+      // Per coppe europee: prova anche scoreboard recente
+      if(lg.isCup){
+        try{
+          const now=new Date();
+          const from=new Date(now.getTime()-180*864e5).toISOString().slice(0,10).replace(/-/g,'');
+          const to=new Date(now.getTime()+180*864e5).toISOString().slice(0,10).replace(/-/g,'');
+          const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${from}-${to}`,3600000);
+          const found=(d?.events||[]).some(e=>{
+            const ne=normEvent(e,'','');
+            return ne&&(ne.homeId===id||ne.awayId===id);
+          });
+          if(found)map.set(lg.slug,{slug:lg.slug,name:lg.name,isCup:true});
+        }catch{}
+      }
     }));
     const main=req.query.main;
-    if(main&&!map.has(main)){const found=SOCCER_LEAGUES.find(l=>l.slug===main);if(found)map.set(main,{slug:main,name:found.name});}
+    if(main&&!map.has(main)){const found=SOCCER_LEAGUES.find(l=>l.slug===main);if(found)map.set(main,{slug:main,name:found.name,isCup:found.isCup||false});}
     res.json({leagues:[...map.values()]});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -432,60 +512,77 @@ app.get('/sport/soccer/:league/live',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// Rosa — football-data.org (rosa completa, 39 giocatori per Inter confermato)
+// Rosa — football-data.org (rosa completa)
+// Strategia: cerca FD team ID per nome (name map hardcoded) poi fallback API
 app.get('/sport/soccer/team/:id/roster',async(req,res)=>{
   try{
-    const espnId=req.params.id;
+    const espnId=String(req.params.id);
     const name=(req.query.name||'').trim();
 
-    // Trova fd team id
-    let fdId=await getFdTeamId(espnId,name);
-
-    // Se non trovato, cerca direttamente per nome
-    if(!fdId&&name){
-      const comps=['SA','CL','PD','PL','BL1','FL1','EL'];
-      for(const comp of comps){
-        try{
-          const d=await fd(`/competitions/${comp}/teams`,86400000);
-          for(const t of(d?.teams||[])){
-            const n=(t.name||'').toLowerCase();
-            const sn=(t.shortName||'').toLowerCase();
-            const q=name.toLowerCase().replace(/\s*(fc|cf|sc|ac|as|ssc)\s*/gi,'').trim().split(' ')[0];
-            if(n.includes(q)||sn.includes(q)){fdId=t.id;fdIdCache.set(espnId,t.id);break;}
-          }
-        }catch{}
-        if(fdId)break;
+    // 1. Name map hardcoded (istantaneo)
+    let fdId=null;
+    const norm=normName(name);
+    if(FD_NAME_MAP[norm]){
+      fdId=FD_NAME_MAP[norm];
+    } else {
+      // match parziale: ogni parola significativa del nome
+      const words=norm.split(' ').filter(w=>w.length>2);
+      for(const [k,v] of Object.entries(FD_NAME_MAP)){
+        if(words.some(w=>k===w||k.startsWith(w)||w.startsWith(k.split(' ')[0]))){
+          fdId=v;break;
+        }
       }
     }
 
+    // 2. Fallback: cerca in tutte le competizioni FD per nome
+    if(!fdId){
+      const comps=['SA','CL','PD','PL','BL1','FL1','EL'];
+      outer: for(const comp of comps){
+        try{
+          const d=await fd('/competitions/'+comp+'/teams',86400000);
+          for(const t of(d?.teams||[])){
+            const tn=normName(t.name);const ts=normName(t.shortName||'');
+            const words=norm.split(' ').filter(w=>w.length>2);
+            if(words.some(w=>tn.includes(w)||ts===w)){fdId=t.id;break outer;}
+          }
+        }catch{}
+      }
+    }
+
+    // 3. Scarica rosa da FD
     if(fdId){
       try{
-        const d=await fd(`/teams/${fdId}`,86400000);
+        const d=await fd('/teams/'+fdId,86400000);
         const squad=d?.squad||[];
         if(squad.length>0){
           return res.json({player:squad.map(p=>({
             idPlayer:String(p.id),
             strPlayer:p.name||'',
-            strPosition:p.position||'',
+            strPosition:mapPosition(p.position||''),
             strNationality:p.nationality||'',
-            strNumber:'',
-            strThumb:'',
+            strNumber:'',strThumb:'',
             dateOfBirth:p.dateOfBirth||'',
           }))});
         }
       }catch{}
     }
 
-    // Fallback TheSportsDB
-    const sd=await sdb(`/searchteams.php?t=${encodeURIComponent(name)}`,3600000).catch(()=>null);
-    const teams=(sd?.teams||[]).filter(t=>['soccer','football'].includes((t.strSport||'').toLowerCase()));
-    if(teams.length>0){
-      const p=await sdb(`/lookup_all_players.php?id=${teams[0].idTeam}`,86400000).catch(()=>null);
+    // 4. Fallback TheSportsDB
+    const sd=await sdb('/searchteams.php?t='+encodeURIComponent(name),3600000).catch(()=>null);
+    const sdbTeams=(sd?.teams||[]).filter(t=>['soccer','football'].includes((t.strSport||'').toLowerCase()));
+    if(sdbTeams.length>0){
+      const p=await sdb('/lookup_all_players.php?id='+sdbTeams[0].idTeam,86400000).catch(()=>null);
       if((p?.player||[]).length>0)return res.json({player:p.player});
     }
     res.json({player:[]});
   }catch(e){res.status(500).json({error:e.message});}
 });
+
+// Mappa posizioni inglese FD → italiano
+function mapPosition(p){
+  const m={'Goalkeeper':'Portiere','Defence':'Difensore','Midfielder':'Centrocampista','Offence':'Attaccante','Defender':'Difensore','Forward':'Attaccante','Winger':'Ala','Attacking Midfield':'Trequartista','Central Midfield':'Centrocampista','Defensive Midfield':'Mediano','Left Back':'Terzino Sinistro','Right Back':'Terzino Destro','Centre-Back':'Difensore Centrale','Left Winger':'Ala Sinistra','Right Winger':'Ala Destra','Centre-Forward':'Centravanti','Second Striker':'Seconda Punta'};
+  return m[p]||p;
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BASKET
@@ -635,85 +732,95 @@ app.get('/sport/f1/last',async(req,res)=>{try{res.json(await ergast('/current/la
 // ══════════════════════════════════════════════════════════════════════════════
 
 // Parser calendario MotoGP da wikitext Wikipedia
+// Struttura confermata dal wikitext reale:
+// ! 1          ← round (riga con !)
+// | 1 March    ← data
+// |{{flagicon|THA}} [[Thailand motorcycle Grand Prix|PT Grand Prix of Thailand]]
+// |[[Chang International Circuit]], [[Buriram]]
 function parseMotoGPWikitext(wt){
-  const races=[];
-  // Cerca la sezione della tabella calendario
-  // Struttura: righe con | Round || GP name || Circuit || Date || ...
-  const lines=wt.split('\n');
-  let inTable=false;
-  let currentRace={};
-  let round=0;
+  const year = new Date().getFullYear();
+  const months = {january:1,february:2,march:3,april:4,may:5,june:6,
+    july:7,august:8,september:9,october:10,november:11,december:12};
 
-  for(let i=0;i<lines.length;i++){
-    const line=lines[i].trim();
+  // Trova il blocco della tabella calendario (dopo "provisionally scheduled")
+  const tableStart = wt.indexOf('{| class="wikitable"', wt.indexOf('provisionally scheduled'));
+  if(tableStart < 0) return [];
+  const tableEnd = wt.indexOf('|}', tableStart);
+  const table = wt.slice(tableStart, tableEnd > 0 ? tableEnd + 2 : wt.length);
 
-    // Inizio tabella calendario (cerca "Season calendar" o "Rnd" header)
-    if(line.includes('Season calendar')||line.includes('Rnd')||line.includes('Grand Prix')||line.includes('{| class="wikitable'))inTable=true;
+  // Splitta per righe separatrici |-
+  const rowBlocks = table.split(/^\|-$/m);
+  const races = [];
 
-    if(!inTable)continue;
+  for(const block of rowBlocks){
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
 
-    // Fine tabella
-    if(line==='|}')break;
+    let round = null, dateStr = '', dateISO = '', gpName = '', circuit = '', country = '';
 
-    // Nuova riga della tabella
-    if(line.startsWith('|-')){
-      if(currentRace.name){races.push(currentRace);}
-      currentRace={};continue;
-    }
-
-    // Celle della tabella — parse contenuto
-    if(line.startsWith('|')&&!line.startsWith('||')&&!line.startsWith('|}')&&!line.startsWith('|+')){
-      const cell=line.replace(/^\|+\s*/,'').trim();
-
-      // Round number
-      if(/^\d+$/.test(cell)&&!currentRace.round){
-        currentRace.round=parseInt(cell);round=currentRace.round;continue;
-      }
-
-      // Link GP → nome
-      const gpMatch=cell.match(/\[\[2\d{3}\s+(.+?(?:Grand Prix|GP).+?)(?:\|[^\]]+)?\]\]/i);
-      if(gpMatch&&!currentRace.name){
-        let name=gpMatch[1].trim();
-        name=name.replace(/motorcycle\s+/i,'').replace(/\s+Grand Prix/i,' GP').replace(/Grand Prix of the\s*/i,'GP of the ').trim();
-        currentRace.name=name;continue;
-      }
-
-      // Circuito
-      const circMatch=cell.match(/\[\[([^\]|]+(?:Circuit|Track|Ring|Autodrome|Speedway|Park)[^\]|]*)/i);
-      if(circMatch&&!currentRace.circuit){
-        currentRace.circuit=circMatch[1].trim();continue;
-      }
-
-      // Data — cerca pattern mese
-      const dateMatch=cell.match(/(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)/i);
-      if(dateMatch&&!currentRace.dateStr){
-        currentRace.dateStr=`${dateMatch[1]} ${dateMatch[2]}`;
-        // Converti in ISO
-        const months={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
-        const m=months[dateMatch[2].toLowerCase()]||1;
-        const y=new Date().getFullYear();
-        currentRace.date=`${y}-${String(m).padStart(2,'0')}-${String(dateMatch[1]).padStart(2,'0')}T12:00:00Z`;
+    for(const line of lines){
+      // Round: riga che inizia con ! e contiene solo numero
+      if(/^!\s*\d+\s*$/.test(line)){
+        round = parseInt(line.replace(/!/g,'').trim());
         continue;
       }
 
-      // Nazione/venue
-      const flagMatch=cell.match(/\{\{flagicon\|([^}]+)\}\}/);
-      if(flagMatch&&!currentRace.country){currentRace.country=flagMatch[1].trim();continue;}
+      // Data: | 1 March  oppure | 22 March–...
+      if(!dateStr){
+        const dm = line.match(/^\|\s*(\d{1,2})(?:[–-]\d{1,2})?\s+(January|February|March|April|May|June|July|August|September|October|November|December)/i);
+        if(dm){
+          const day = parseInt(dm[1]);
+          const mon = months[dm[2].toLowerCase()] || 1;
+          dateISO = `${year}-${String(mon).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+          dateStr = `${dm[1]} ${dm[2]}`;
+          continue;
+        }
+      }
+
+      // GP name: riga con flagicon + link GP
+      if(!gpName){
+        const flagM = line.match(/\{\{flagicon\|([^}]+)\}\}/);
+        if(flagM) country = flagM[1].trim();
+        // Link GP: [[X motorcycle Grand Prix|Nome GP]] oppure [[X Grand Prix|Nome]]
+        const gpM = line.match(/\[\[[^\]]*?(?:Grand Prix|motorcycle Grand Prix)[^\]]*?\|([^\]]+)\]\]/i)
+                 || line.match(/\[\[([^\]|]*(?:Grand Prix)[^\]|]*)\]\]/i);
+        if(gpM){
+          gpName = gpM[1].trim()
+            .replace(/Grand Prix of the\s*/i,'GP of the ')
+            .replace(/\s*Grand Prix/i,' GP')
+            // Rimuovi sponsor title prima del "GP of/Grand Prix"
+            .replace(/^.+?(?=GP of|GP\b)/i, s => {
+              // Tieni solo se inizia con un paese/luogo
+              const clean = s.replace(/^[A-Z][a-z]+ [A-Z][a-z]+ [\d,\s]*/,'').trim();
+              return clean||s;
+            })
+            .replace(/\s+/g,' ').trim();
+          continue;
+        }
+      }
+
+      // Circuito: riga con [[CircuitName, City]] (senza flagicon di solito)
+      if(!circuit && !line.includes('flagicon') && !line.includes('Grand Prix')){
+        const circM = line.match(/^\|\[\[([^\]|]{5,80})(?:\|[^\]]+)?\]\]/);
+        if(circM) circuit = circM[1].trim();
+      }
+    }
+
+    if(round && gpName){
+      races.push({
+        round,
+        idEvent: `wiki_moto_${round}`,
+        strEvent: gpName,
+        strLeague: 'MotoGP',
+        date: dateISO ? dateISO + 'T12:00:00Z' : '',
+        dateEvent: dateISO,
+        strVenue: circuit,
+        strCountry: country,
+      });
     }
   }
-  if(currentRace.name)races.push(currentRace);
 
-  // Rimuovi duplicati e aggiungi round se mancante
-  return races.filter(r=>r.name).map((r,i)=>({
-    ...r,
-    round:r.round||(i+1),
-    idEvent:`wiki_moto_${r.round||i+1}`,
-    strEvent:r.name,
-    strLeague:'MotoGP',
-    dateEvent:r.date?r.date.split('T')[0]:'',
-    strVenue:r.circuit||'',
-    strCountry:r.country||'',
-  }));
+  races.sort((a,b) => a.round - b.round);
+  return races;
 }
 
 app.get('/sport/motogp/calendar',async(req,res)=>{
