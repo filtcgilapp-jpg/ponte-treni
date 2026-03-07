@@ -57,6 +57,9 @@ const SOCCER_LEAGUES=[
   {slug:'eng.fa',             name:'FA Cup',               fd:'FAC', isCup:true},
   {slug:'ger.dfb_pokal',      name:'DFB Pokal',            fd:'DFB', isCup:true},
   {slug:'fra.coupe_de_france',name:'Coppa di Francia',     fd:null,  isCup:true},
+  {slug:'ita.super_cup',      name:'Supercoppa Italiana',  fd:null,  isCup:true},
+  {slug:'esp.super_cup',      name:'Supercoppa Spagnola',  fd:null,  isCup:true},
+  {slug:'uefa.super_cup',     name:'UEFA Super Cup',       fd:null,  isCup:true},
 ];
 
 // Mappa football-data team ID ↔ ESPN team ID (popolata dinamicamente)
@@ -222,6 +225,12 @@ function mapStage(s){
   if(lower.includes('qualifying'))return'Qualificazioni';
   if(lower.includes('1st leg')||lower==='andata')return'Andata';
   if(lower.includes('2nd leg')||lower==='ritorno')return'Ritorno';
+  // Nomi lega generici usati come fase (ESPN fallback) → Fase Knockout
+  if(lower==='champions league'||lower==='cl')return'Fase Knockout';
+  if(lower==='europa league'||lower==='el')return'Fase Knockout';
+  if(lower==='conference league')return'Fase Knockout';
+  if(lower==='coppa italia')return'Fase a Eliminazione';
+  if(lower==='fa cup'||lower==='dfb pokal'||lower==='coupe de france'||lower==='copa del rey')return'Fase a Eliminazione';
   // Giornata numerica
   const gm=lower.match(/(?:matchday|giornata|round|md)\s*(\d+)/);
   if(gm)return`Giornata ${gm[1]}`;
@@ -376,6 +385,39 @@ app.get('/sport/soccer/team/:id/events',async(req,res)=>{
     const id=req.params.id;
     const allEvents=[];const seen=new Set();
 
+    // Squadre da TheSportsDB (Serie C, leghe minori): usa SDB direttamente
+    if(id.startsWith('sdb:')){
+      const sdbId=id.replace('sdb:','');
+      try{
+        const[last,next]=await Promise.all([
+          sdb(`/eventslast.php?id=${sdbId}`,1800000).catch(()=>({results:[]})),
+          sdb(`/eventsnext.php?id=${sdbId}`,1800000).catch(()=>({events:[]})),
+        ]);
+        const past=(last?.results||last?.events||[]).map(e=>({
+          id:String(e.idEvent),
+          date:e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',
+          league:e.strLeague||'Serie C',leagueSlug:'ita.3',
+          homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
+          homeScore:e.intHomeScore!=null?String(e.intHomeScore):'',
+          awayScore:e.intAwayScore!=null?String(e.intAwayScore):'',
+          homeId:'',awayId:'',completed:e.intHomeScore!=null,live:false,clock:'',
+          round:e.intRound?`Giornata ${e.intRound}`:'',statusDetail:'',
+        }));
+        const future=(next?.events||[]).map(e=>({
+          id:String(e.idEvent),
+          date:e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',
+          league:e.strLeague||'Serie C',leagueSlug:'ita.3',
+          homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
+          homeScore:'',awayScore:'',homeId:'',awayId:'',
+          completed:false,live:false,clock:'',
+          round:e.intRound?`Giornata ${e.intRound}`:'',statusDetail:'',
+        }));
+        const all=[...past,...future];
+        all.sort((a,b)=>new Date(a.date)-new Date(b.date));
+        return res.json({events:all});
+      }catch(err){return res.json({events:[],error:err.message});}
+    }
+
     // Passate: ESPN schedule
     await Promise.all(SOCCER_LEAGUES.map(async(lg)=>{
       try{
@@ -499,7 +541,11 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
           if(!e||e.$ref)continue;
           const ne=normEvent(e,slug,slug);if(!ne||seen.has(ne.id))continue;
           const comp=(e.competitions||[])[0]||{};
-          ne.round=mapPhaseESPN(comp.notes?.[0]?.headline||comp.type?.text||'');
+          // Prova più campi ESPN per determinare la fase
+          const headline=comp.notes?.[0]?.headline||'';
+          const typeText=comp.type?.text||'';
+          const rawPhase=headline||typeText||'';
+          ne.round=rawPhase?mapPhaseESPN(rawPhase):'';
           seen.add(ne.id);allEvents.push(ne);
         }
       }catch{}
@@ -514,7 +560,8 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
         const ne=normEvent(e,slug,slug);if(!ne)continue;
         if(teamId&&ne.homeId!==teamId&&ne.awayId!==teamId)continue;
         const comp=(e.competitions||[])[0]||{};
-        ne.round=mapPhaseESPN(comp.notes?.[0]?.headline||comp.type?.text||'');
+        const hl2=comp.notes?.[0]?.headline||comp.type?.text||'';
+        ne.round=hl2?mapPhaseESPN(hl2):'';
         if(!seen.has(ne.id)){seen.add(ne.id);allEvents.push(ne);}
       }
     }catch{}
@@ -551,13 +598,32 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
 
     allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
 
-    // Raggruppa per fase
+    // Raggruppa per fase, assegna fase mancante in base alla data/contesto
+    const phaseOrder=['Qualificazioni','Turno Preliminare','Fase a Gironi','Playoff',
+      'Sedicesimi di Finale','Ottavi di Finale','Quarti di Finale','Semifinale','Andata','Ritorno',
+      'Finale','Fase a Eliminazione','Fase Knockout'];
+    // Per eventi senza round, cerca di dedurre dalla posizione temporale
     const phaseMap=new Map();
     for(const e of allEvents){
-      const ph=e.round||lg?.name||slug;
+      let ph=e.round;
+      if(!ph||ph===''){
+        // Prova a inferire: se altri eventi nella stessa settimana hanno una fase, usa quella
+        // Altrimenti usa "Fase Knockout" per coppe
+        const isKnockout=SOCCER_LEAGUES.find(l=>l.slug===slug)?.isCup;
+        ph=isKnockout?'Fase a Eliminazione':'Altra Fase';
+      }
       if(!phaseMap.has(ph))phaseMap.set(ph,[]);
       phaseMap.get(ph).push(e);
     }
+    // Ordina le fasi in ordine logico
+    const sortedPhases=[...phaseMap.entries()].sort((a,b)=>{
+      const ai=phaseOrder.indexOf(a[0]);
+      const bi=phaseOrder.indexOf(b[0]);
+      if(ai>=0&&bi>=0)return ai-bi;
+      if(ai>=0)return -1;
+      if(bi>=0)return 1;
+      return a[0].localeCompare(b[0]);
+    });
 
     // Standings gironi
     let standings=[];
@@ -583,7 +649,7 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
       }
     }catch{}
 
-    res.json({phases:[...phaseMap.entries()].map(([name,events])=>({name,events})),standings});
+    res.json({phases:sortedPhases.map(([name,events])=>({name,events})),standings});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -724,21 +790,25 @@ app.get('/sport/basketball/search',async(req,res)=>{
         }catch{}
       }));
     }
-    // Fallback TheSportsDB
-    if(seen.size===0){
-      try{
-        const d=await sdb(`/searchteams.php?t=${encodeURIComponent(q)}`,3600000);
-        for(const t of(d?.teams||[])){
-          if((t.strSport||'').toLowerCase()!=='basketball')continue;
-          const dn=(t.strTeam||'').toLowerCase();
-          if(!dn.includes(q))continue;
-          if(!seen.has(dn))seen.set(dn,{
-            id:`sdb:${t.idTeam}`,name:t.strTeam,shortName:t.strTeamShort||t.strTeam,
-            league:t.strLeague||'Basketball',leagueSlug:'basketball',
-          });
-        }
-      }catch{}
-    }
+    // TheSportsDB — sempre, per coprire LBA/EuroLeague non in ESPN
+    try{
+      const d=await sdb(`/searchteams.php?t=${encodeURIComponent(q)}`,3600000);
+      for(const t of(d?.teams||[])){
+        const sport=(t.strSport||'').toLowerCase();
+        if(!sport.includes('basketball')&&!sport.includes('basket'))continue;
+        const dn=(t.strTeam||'').toLowerCase();
+        if(!dn.includes(q)&&!(t.strTeamShort||'').toLowerCase().includes(q))continue;
+        if(seen.has(dn))continue;
+        const lg=(t.strLeague||'').toLowerCase();
+        const slug=lg.includes('euroleague')?'euroleague':
+                   lg.includes('eurocup')?'eurocup':
+                   lg.includes('lba')||lg.includes('legabasket')||lg.includes('serie a')?'ita.lba':
+                   lg.includes('nba')?'nba':'euroleague';
+        seen.set(dn,{id:`sdb:${t.idTeam}`,name:t.strTeam,
+          shortName:t.strTeamShort||t.strTeam,
+          league:t.strLeague||'Basketball',leagueSlug:slug});
+      }
+    }catch{}
     res.json({teams:[...seen.values()]});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -915,21 +985,40 @@ app.get('/sport/tennis/player/:id/info',async(req,res)=>{
 app.get('/sport/tennis/ranking/:type',async(req,res)=>{
   try{
     const isWTA=req.params.type==='wta';const tour=isWTA?'wta':'atp';
-    for(const url of[`${ESPN2}/tennis/${tour}/rankings`,`${ESPN}/tennis/${tour}/rankings`]){
+    // ESPN usa ESPN2 (site.web.api.espn.com) per rankings
+    const urls=[
+      `https://site.web.api.espn.com/apis/v2/sports/tennis/${tour}/rankings?limit=100`,
+      `${ESPN2}/tennis/${tour}/rankings?limit=100`,
+      `${ESPN}/tennis/${tour}/rankings`,
+    ];
+    for(const url of urls){
       try{
         const d=await fetch(url,3600000);
-        const entries=d?.rankings?.[0]?.entries||d?.entries||[];
+        const entries=d?.rankings?.[0]?.entries||d?.entries||d?.athletes||[];
         if(entries.length>0){
-          return res.json({ranking:entries.slice(0,100).map((e,i)=>({
+          return res.json({rankings:entries.slice(0,100).map((e,i)=>({
             rank:e.currentRanking||e.ranking||i+1,
             name:e.athlete?.displayName||e.player?.displayName||e.team?.displayName||'',
-            country:e.athlete?.flag?.alt||e.athlete?.country?.abbreviation||'',
+            country:e.athlete?.flag?.alt||e.athlete?.country?.abbreviation||e.athlete?.nationality||'',
             points:e.rankingPoints||e.points||0,
+            id:String(e.athlete?.id||e.player?.id||''),
           }))});
         }
       }catch{}
     }
-    res.json({ranking:[]});
+    // Fallback: TheSportsDB top 50 per tour
+    try{
+      const leagueId=isWTA?'4303':'4302';
+      const d=await sdb(`/lookup_all_players.php?id=${leagueId}`,86400000).catch(()=>null);
+      if((d?.player||[]).length>0){
+        return res.json({rankings:(d.player||[]).slice(0,50).map((p,i)=>({
+          rank:i+1,name:p.strPlayer||'',
+          country:p.strNationality||'',points:0,
+          id:String(p.idPlayer||''),
+        }))});
+      }
+    }catch{}
+    res.json({rankings:[]});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -937,7 +1026,24 @@ app.get('/sport/tennis/ranking/:type',async(req,res)=>{
 // F1
 // ══════════════════════════════════════════════════════════════════════════════
 const F1Y=new Date().getFullYear();
-app.get('/sport/f1/calendar',async(req,res)=>{try{res.json(await ergast(`/${F1Y}`));}catch(e){res.status(500).json({error:e.message});}});
+app.get('/sport/f1/calendar',async(req,res)=>{
+  try{
+    const cal=await ergast(`/${F1Y}`);
+    const races=cal?.MRData?.RaceTable?.Races||[];
+    const now=new Date();
+    // Per le gare passate, aggiungi risultati (top 3)
+    await Promise.all(races.map(async(race)=>{
+      const raceDate=new Date(race.date);
+      if(raceDate<now){
+        try{
+          const r=await ergast(`/${F1Y}/${race.round}/results`);
+          race.Results=(r?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,3);
+        }catch{}
+      }
+    }));
+    res.json(cal);
+  }catch(e){res.status(500).json({error:e.message});}
+});
 app.get('/sport/f1/drivers',async(req,res)=>{
   try{for(const y of[F1Y,F1Y-1]){const d=await ergast(`/${y}/driverStandings`).catch(()=>null);if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.length>0)return res.json(d);}res.status(500).json({error:'Non disponibile'});}catch(e){res.status(500).json({error:e.message});}
 });
@@ -1108,7 +1214,6 @@ app.get('/sport/soccer/standings/all',async(req,res)=>{
     {slug:'ita.2',name:'Serie B'},
     {slug:'uefa.champions',name:'Champions League'},
     {slug:'uefa.europa',name:'Europa League'},
-    {slug:'uefa.conference',name:'Conference League'},
     {slug:'esp.1',name:'La Liga'},
     {slug:'eng.1',name:'Premier League'},
     {slug:'ger.1',name:'Bundesliga'},
@@ -1158,6 +1263,133 @@ app.get('/sport/soccer/standings/all',async(req,res)=>{
     }catch{return null;}
   }));
   res.json({leagues:results.filter(Boolean)});
+});
+
+// ── CLASSIFICHE BASKET ────────────────────────────────────────────────────────
+app.get('/sport/basketball/standings/all',async(req,res)=>{
+  const leagues=[
+    {slug:'ita.lba',name:'Lega Basket Serie A'},
+    {slug:'euroleague',name:'EuroLeague'},
+    {slug:'eurocup',name:'EuroCup'},
+    {slug:'nba',name:'NBA'},
+  ];
+  const results=await Promise.all(leagues.map(async(lg)=>{
+    try{
+      const yr=new Date().getFullYear();
+      let entries=[];
+      for(const y of[yr,yr-1]){
+        for(const url of[
+          `${ESPN2}/basketball/${lg.slug}/standings?season=${y}`,
+          `${ESPN}/basketball/${lg.slug}/standings`,
+        ]){
+          try{
+            const d=await fetch(url,3600000);
+            for(const g of(d?.children||[])){entries.push(...(g.standings?.entries||[]));}
+            if(!entries.length)entries=d?.standings?.entries||[];
+            if(entries.length)break;
+          }catch{}
+          if(entries.length)break;
+        }
+        if(entries.length)break;
+      }
+      if(!entries.length)return null;
+      return{
+        slug:lg.slug,name:lg.name,
+        standings:entries.map((e,i)=>{
+          const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
+          return{
+            rank:Math.round(stats['rank']||i+1),
+            name:e.team?.displayName||'',
+            shortName:e.team?.shortDisplayName||e.team?.displayName||'',
+            teamId:String(e.team?.id||''),
+            logo:e.team?.logos?.[0]?.href||'',
+            played:Math.round(stats['gamesPlayed']||0),
+            wins:Math.round(stats['wins']||0),
+            losses:Math.round(stats['losses']||0),
+            points:Math.round(stats['points']||stats['winPercent']||0),
+            pct:stats['winPercent']?Math.round(stats['winPercent']*1000)/10:null,
+          };
+        }),
+      };
+    }catch{return null;}
+  }));
+  res.json({leagues:results.filter(Boolean)});
+});
+
+// ── TABELLONE COPPE (partite per fase) ────────────────────────────────────────
+const CUP_LEAGUES=[
+  // Coppe europee
+  {slug:'uefa.champions',   name:'Champions League',    fd:'CL',   group:'Europa'},
+  {slug:'uefa.europa',      name:'Europa League',       fd:'EL',   group:'Europa'},
+  {slug:'uefa.conference',  name:'Conference League',   fd:'ECSL', group:'Europa'},
+  {slug:'uefa.super_cup',   name:'UEFA Super Cup',      fd:null,   group:'Europa'},
+  // Coppe italiane
+  {slug:'ita.coppa_italia', name:'Coppa Italia',        fd:null,   group:'Italia'},
+  {slug:'ita.super_cup',    name:'Supercoppa Italiana', fd:null,   group:'Italia'},
+  // Coppe straniere
+  {slug:'esp.copa_del_rey', name:'Copa del Rey',        fd:null,   group:'Estero'},
+  {slug:'esp.super_cup',    name:'Supercoppa Spagnola', fd:null,   group:'Estero'},
+  {slug:'eng.fa',           name:'FA Cup',              fd:'FAC',  group:'Estero'},
+  {slug:'ger.dfb_pokal',    name:'DFB Pokal',           fd:'DFB',  group:'Estero'},
+  {slug:'fra.coupe_de_france',name:'Coupe de France',   fd:'CDF',  group:'Estero'},
+];
+
+app.get('/sport/soccer/cups',async(req,res)=>{
+  try{
+    const from='20250801';
+    const to=new Date(Date.now()+180*864e5).toISOString().slice(0,10).replace(/-/g,'');
+    const results=await Promise.all(CUP_LEAGUES.map(async(lg)=>{
+      const events=[];const seen=new Set();
+      // ESPN scoreboard
+      try{
+        const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${from}-${to}`,3600000);
+        for(const e of(d?.events||[])){
+          const ne=normEvent(e,lg.name,lg.slug);
+          if(!ne||seen.has(ne.id))continue;
+          const comp=(e.competitions||[])[0]||{};
+          const hl=comp.notes?.[0]?.headline||comp.type?.text||'';
+          ne.round=hl?mapPhaseESPN(hl):'';
+          seen.add(ne.id);events.push(ne);
+        }
+      }catch{}
+      // football-data fallback per Conference e coppe con fd
+      if(lg.fd&&events.length<5){
+        try{
+          const yr=new Date().getFullYear();
+          const d=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,3600000).catch(()=>null);
+          for(const m of(d?.matches||[])){
+            const eid=`fd:${m.id}`;if(seen.has(eid))continue;seen.add(eid);
+            events.push({
+              id:eid,date:m.utcDate||'',league:lg.name,leagueSlug:lg.slug,
+              homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
+              awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
+              homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
+              awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
+              homeId:'',awayId:'',completed:m.status==='FINISHED',live:false,clock:'',
+              round:mapStage(m.stage||''),statusDetail:'',
+            });
+          }
+        }catch{}
+      }
+      events.sort((a,b)=>new Date(a.date)-new Date(b.date));
+      // Raggruppa per fase
+      const phaseMap=new Map();
+      for(const e of events){
+        const ph=e.round||'Partite';
+        if(!phaseMap.has(ph))phaseMap.set(ph,[]);
+        phaseMap.get(ph).push(e);
+      }
+      const phaseOrder=['Qualificazioni','Fase a Gironi','Playoff','Sedicesimi di Finale',
+        'Ottavi di Finale','Quarti di Finale','Semifinale','Andata','Ritorno','Finale',
+        'Fase a Eliminazione','Fase Knockout','Partite'];
+      const phases=[...phaseMap.entries()]
+        .sort((a,b)=>{const ai=phaseOrder.indexOf(a[0]),bi=phaseOrder.indexOf(b[0]);
+          return ai>=0&&bi>=0?ai-bi:ai>=0?-1:bi>=0?1:0;})
+        .map(([name,evs])=>({name,events:evs}));
+      return{slug:lg.slug,name:lg.name,group:lg.group,phases,totalEvents:events.length};
+    }));
+    res.json({cups:results.filter(c=>c.totalEvents>0)});
+  }catch(e){res.status(500).json({error:e.message});}
 });
 
 const PORT=process.env.PORT||10000;
