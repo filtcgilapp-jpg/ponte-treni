@@ -38,8 +38,11 @@ async function ergast(path,ttl=3600000){
 }
 
 const SOCCER_LEAGUES=[
-  // Campionati
+  // Campionati italiani
   {slug:'ita.1',              name:'Serie A',              fd:'SA',  isCup:false},
+  {slug:'ita.2',              name:'Serie B',              fd:null,  isCup:false},
+  {slug:'ita.3',              name:'Serie C',              fd:null,  isCup:false},
+  // Campionati europei
   {slug:'esp.1',              name:'La Liga',              fd:'PD',  isCup:false},
   {slug:'eng.1',              name:'Premier League',       fd:'PL',  isCup:false},
   {slug:'ger.1',              name:'Bundesliga',           fd:'BL1', isCup:false},
@@ -80,6 +83,26 @@ const FD_NAME_MAP = {
   'torino':586,'torino fc':586,
   'lecce':5890,'us lecce':5890,
   'como':7397,'como 1907':7397,
+  // Serie B
+  'palermo':488,'us palermo':488,
+  'sampdoria':489,'uc sampdoria':489,
+  'bari':6226,'ssc bari':6226,
+  'catanzaro':3629,
+  'cremonese':457,'us cremonese':457,
+  'pisa':487,'ac pisa':487,
+  'frosinone':6240,'frosinone calcio':6240,
+  'venezia':523,'venezia fc':523,
+  'brescia':3298,'brescia calcio':3298,
+  'spezia':6212,'spezia calcio':6212,
+  'modena':2320,'modena fc':2320,
+  'sassuolo':471,'us sassuolo':471,
+  'reggiana':2321,'ac reggiana':2321,
+  'mantova':2322,
+  'juve stabia':2323,'ss juve stabia':2323,
+  'cesena':2324,'ac cesena':2324,
+  'carrarese':2325,
+  'sudtirol':2326,'fc sudtirol':2326,
+  'cosenza':6241,'cosenza calcio':6241,
   // Champions + altre
   'real madrid':86,'real':86,
   'barcelona':81,'fc barcelona':81,
@@ -145,37 +168,50 @@ function normEvent(e,leagueName,leagueSlug){
   }catch{return null;}
 }
 
-// ─── Mappa stage coppa → italiano ─────────────────────────────────────────────
+// ─── Mappa stage → italiano (football-data + ESPN) ────────────────────────────
 function mapStage(s){
   if(!s)return'';
-  const m={
+  // football-data.org stage values
+  const fdMap={
     'FINAL':'Finale','SEMI_FINALS':'Semifinale','QUARTER_FINALS':'Quarti di Finale',
     'ROUND_OF_16':'Ottavi di Finale','ROUND_OF_32':'Sedicesimi di Finale',
     'ROUND_OF_64':'Trentaduesimi','GROUP_STAGE':'Fase a Gironi',
+    'LEAGUE_STAGE':'Fase a Gironi','LEAGUE STAGE':'Fase a Gironi',
     'PLAYOFF_ROUND_ONE':'Playoff','PLAYOFF_ROUND_TWO':'Playoff',
+    'PLAYOFFS':'Playoff','PLAY_OFF_ROUND':'Playoff',
     'QUALIFYING':'Qualificazioni','QUALIFYING_ROUNDS':'Qualificazioni',
     'PRELIMINARY_ROUND':'Turno Preliminare','PRELIMINARY_SEMI_FINALS':'Semifinale Preliminare',
     '1ST_LEG':'Andata','2ND_LEG':'Ritorno',
   };
-  return m[s]||s.replace(/_/g,' ');
+  if(fdMap[s])return fdMap[s];
+  // ESPN text values (case-insensitive fuzzy)
+  const lower=s.toLowerCase().trim();
+  if(lower==='final'||lower==='finale')return'Finale';
+  if(lower.includes('semi'))return'Semifinale';
+  if(lower.includes('quarter')||lower==='quarti di finale')return'Quarti di Finale';
+  if(lower==='last 16'||lower.includes('round of 16')||lower.includes('ottavi'))return'Ottavi di Finale';
+  if(lower==='last 32'||lower.includes('round of 32'))return'Sedicesimi di Finale';
+  if(lower.includes('league stage')||lower.includes('group stage')||lower.includes('girone'))return'Fase a Gironi';
+  if(lower.includes('playoff'))return'Playoff';
+  if(lower.includes('qualifying'))return'Qualificazioni';
+  if(lower.includes('1st leg')||lower==='andata')return'Andata';
+  if(lower.includes('2nd leg')||lower==='ritorno')return'Ritorno';
+  // Giornata numerica
+  const gm=lower.match(/(?:matchday|giornata|round|md)\s*(\d+)/);
+  if(gm)return`Giornata ${gm[1]}`;
+  return s;
 }
 
 // ─── Mappa fase ESPN → italiano ───────────────────────────────────────────────
-function mapPhaseESPN(raw){
-  if(!raw)return'';
-  const r=raw.toLowerCase();
-  if(r.includes('semifinal'))return'Semifinale';
-  if(r.includes('quarterfinal')||r.includes('quarter-final'))return'Quarti di Finale';
-  if(r.includes('round of 16')||r.includes('ottavi'))return'Ottavi di Finale';
-  if(r.includes('round of 32'))return'Sedicesimi di Finale';
-  if(r.includes('final')&&!r.includes('semi')&&!r.includes('quarter')&&!r.includes('round'))return'Finale';
-  if(r.includes('group')||r.includes('girone'))return'Fase a Gironi';
-  if(r.includes('1st leg'))return'Andata';if(r.includes('2nd leg'))return'Ritorno';
-  return raw;
-}
+function mapPhaseESPN(raw){ return mapStage(raw); }
 
 // ── HEALTH ────────────────────────────────────────────────────────────────────
 app.get('/',(req,res)=>res.send('OK '+new Date().toISOString()));
+app.get('/cache/clear',async(req,res)=>{
+  // Svuota solo le entry Wikipedia MotoGP
+  for(const[k] of cache){if(k.includes('wikipedia')||k.includes('wiki'))cache.delete(k);}
+  res.json({cleared:true,remaining:cache.size});
+});
 app.get('/img',async(req,res)=>{
   try{
     const r=await axios.get(req.query.url,{responseType:'arraybuffer',timeout:10000});
@@ -592,16 +628,54 @@ app.get('/sport/basketball/search',async(req,res)=>{
   try{
     const q=(req.query.q||'').toLowerCase().trim();if(q.length<2)return res.json({teams:[]});
     const seen=new Map();
+    // ESPN /teams per ogni lega
     await Promise.all(BBALL_LEAGUES.map(async(lg)=>{
       try{
         const d=await fetch(`${ESPN}/basketball/${lg.slug}/teams`,86400000);
         for(const t of(d?.sports?.[0]?.leagues?.[0]?.teams||[])){
           const team=t.team;const dn=(team.displayName||'').toLowerCase();
-          if(!dn.includes(q))continue;
-          if(!seen.has(dn))seen.set(dn,{id:String(team.id),name:team.displayName,league:lg.name,leagueSlug:lg.slug});
+          const sn=(team.shortDisplayName||'').toLowerCase();
+          if(!dn.includes(q)&&!sn.includes(q))continue;
+          if(!seen.has(dn))seen.set(dn,{id:String(team.id),name:team.displayName,shortName:team.shortDisplayName||team.displayName,league:lg.name,leagueSlug:lg.slug});
         }
       }catch{}
     }));
+    // Se non trovato con ESPN /teams, cerca via scoreboard (Euroleague/LBA spesso non in /teams)
+    if(seen.size===0){
+      await Promise.all(BBALL_LEAGUES.map(async(lg)=>{
+        try{
+          const d=await fetch(`${ESPN}/basketball/${lg.slug}/scoreboard`,3600000);
+          for(const e of(d?.events||[])){
+            const comps=(e.competitions||[])[0]?.competitors||[];
+            for(const c of comps){
+              const team=c.team;
+              const dn=(team?.displayName||'').toLowerCase();
+              const sn=(team?.shortDisplayName||'').toLowerCase();
+              if(!dn.includes(q)&&!sn.includes(q))continue;
+              if(team?.id&&!seen.has(dn))seen.set(dn,{
+                id:String(team.id),name:team.displayName,shortName:team.shortDisplayName||team.displayName,
+                league:lg.name,leagueSlug:lg.slug,
+              });
+            }
+          }
+        }catch{}
+      }));
+    }
+    // Fallback TheSportsDB
+    if(seen.size===0){
+      try{
+        const d=await sdb(`/searchteams.php?t=${encodeURIComponent(q)}`,3600000);
+        for(const t of(d?.teams||[])){
+          if((t.strSport||'').toLowerCase()!=='basketball')continue;
+          const dn=(t.strTeam||'').toLowerCase();
+          if(!dn.includes(q))continue;
+          if(!seen.has(dn))seen.set(dn,{
+            id:`sdb:${t.idTeam}`,name:t.strTeam,shortName:t.strTeamShort||t.strTeam,
+            league:t.strLeague||'Basketball',leagueSlug:'basketball',
+          });
+        }
+      }catch{}
+    }
     res.json({teams:[...seen.values()]});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -664,13 +738,18 @@ app.get('/sport/tennis/search',async(req,res)=>{
 app.get('/sport/tennis/player/:id/events',async(req,res)=>{
   try{
     const id=req.params.id;
-    const[last,next]=await Promise.all([
-      sdb(`/eventslast.php?id=${id}`,1800000).catch(()=>null),
-      sdb(`/eventsnext.php?id=${id}`,1800000).catch(()=>null),
-    ]);
+    // TheSportsDB — spesso vuoto per top player
     const toArr=d=>{if(!d)return[];const v=d.results||d.events||d.event||[];return Array.isArray(v)?v:[];};
-    let past=toArr(last),upcoming=toArr(next);
-    // Se vuoti, prova con idTeam del giocatore
+    let past=[],upcoming=[];
+    try{
+      const[last,next]=await Promise.all([
+        sdb(`/eventslast.php?id=${id}`,1800000),
+        sdb(`/eventsnext.php?id=${id}`,1800000),
+      ]);
+      past=toArr(last);upcoming=toArr(next);
+    }catch{}
+
+    // Se TheSportsDB vuoto, prova con idTeam
     if(!past.length&&!upcoming.length){
       try{
         const info=await sdb(`/lookupplayer.php?id=${id}`,86400000);
@@ -681,6 +760,42 @@ app.get('/sport/tennis/player/:id/events',async(req,res)=>{
             sdb(`/eventsnext.php?id=${teamId}`,1800000).catch(()=>null),
           ]);
           past=toArr(tl);upcoming=toArr(tn);
+        }
+      }catch{}
+    }
+
+    // Se ancora vuoto, usa ESPN tennis schedule per il torneo corrente
+    // Cerca il giocatore per nome nel ranking e poi nei tornei
+    if(!past.length&&!upcoming.length){
+      try{
+        // Prova ATP schedule ESPN — tornei recenti/prossimi
+        const now=new Date();
+        const from=new Date(now.getTime()-30*864e5).toISOString().slice(0,10).replace(/-/g,'');
+        const to=new Date(now.getTime()+60*864e5).toISOString().slice(0,10).replace(/-/g,'');
+        const d=await fetch(`${ESPN}/tennis/atp/scoreboard?dates=${from}-${to}`,600000).catch(()=>null);
+        if(d?.events?.length){
+          // Filtra eventi che coinvolgono il giocatore cercando il nome nel ranking
+          const playerInfo=await sdb(`/lookupplayer.php?id=${id}`,86400000).catch(()=>null);
+          const playerName=(playerInfo?.players||playerInfo?.player||[])[0]?.strPlayer||'';
+          const nameParts=playerName.toLowerCase().split(' ');
+          for(const e of(d.events||[])){
+            const comps=(e.competitions||[])[0]?.competitors||[];
+            const involved=comps.some(c=>{
+              const an=(c.athlete?.displayName||c.team?.displayName||'').toLowerCase();
+              return nameParts.some(p=>p.length>3&&an.includes(p));
+            });
+            if(!involved)continue;
+            const comp=(e.competitions||[])[0]||{};
+            const st=comp.status?.type||{};
+            const completed=!!st.completed;
+            const ev={
+              idEvent:String(e.id),strEvent:e.name||e.shortName||'',
+              dateEvent:e.date?e.date.split('T')[0]:'',strTime:e.date||'',
+              strStatus:completed?'Match Finished':'',
+              strLeague:'ATP',
+            };
+            if(completed)past.push(ev);else upcoming.push(ev);
+          }
         }
       }catch{}
     }
@@ -836,7 +951,7 @@ app.get('/sport/motogp/calendar',async(req,res)=>{
     try{
       const wiki=await fetch(
         `https://en.wikipedia.org/w/api.php?action=query&titles=${year}_MotoGP_World_Championship&prop=revisions&rvprop=content&format=json&formatversion=2`,
-        7200000
+        1800000 // 30 min cache
       );
       const wt=wiki?.query?.pages?.[0]?.revisions?.[0]?.content||'';
       if(wt.length>1000){
