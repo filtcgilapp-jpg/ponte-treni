@@ -806,59 +806,6 @@ function mapPosition(p){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// BASKET — solo NBA classifica
-// ══════════════════════════════════════════════════════════════════════════════
-app.get('/sport/basketball/nba/standings',async(req,res)=>{
-  try{
-    const d=await fetch(`${ESPN}/basketball/nba/standings`,3600000);
-    const entries=[];
-    for(const conf of(d?.children||[])){
-      const confName=conf.name||'';
-      for(const div of(conf.children||[])){
-        for(const e of(div.standings?.entries||[])){
-          const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
-          entries.push({
-            name:e.team?.displayName||'',
-            shortName:e.team?.shortDisplayName||e.team?.displayName||'',
-            teamId:String(e.team?.id||''),
-            conference:confName,
-            wins:Math.round(stats['wins']||0),
-            losses:Math.round(stats['losses']||0),
-            pct:stats['winPercent']!=null?Math.round(stats['winPercent']*100)/100:null,
-            gb:stats['gamesBehind']!=null?Math.round(stats['gamesBehind']*10)/10:null,
-          });
-        }
-      }
-      // Fallback se non ci sono divisioni
-      if(!conf.children?.length){
-        for(const e of(conf.standings?.entries||[])){
-          const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
-          entries.push({
-            name:e.team?.displayName||'',
-            shortName:e.team?.shortDisplayName||e.team?.displayName||'',
-            teamId:String(e.team?.id||''),
-            conference:confName,
-            wins:Math.round(stats['wins']||0),
-            losses:Math.round(stats['losses']||0),
-            pct:stats['winPercent']!=null?Math.round(stats['winPercent']*100)/100:null,
-            gb:stats['gamesBehind']!=null?Math.round(stats['gamesBehind']*10)/10:null,
-          });
-        }
-      }
-    }
-    // Se struttura piatta
-    if(entries.length===0){
-      const flat=d?.standings?.entries||[];
-      for(const e of flat){
-        const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
-        entries.push({name:e.team?.displayName||'',shortName:e.team?.shortDisplayName||'',teamId:String(e.team?.id||''),conference:'',wins:Math.round(stats['wins']||0),losses:Math.round(stats['losses']||0),pct:stats['winPercent']!=null?Math.round(stats['winPercent']*100)/100:null,gb:null});
-      }
-    }
-    res.json({standings:entries});
-  }catch(e){res.status(500).json({error:e.message});}
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
 // F1
 // ══════════════════════════════════════════════════════════════════════════════
 const F1Y=new Date().getFullYear();
@@ -994,6 +941,33 @@ app.get('/sport/f1/last',async(req,res)=>{
     }
     // Nessuna gara della stagione corrente ancora disputata
     res.json({MRData:{RaceTable:{Races:[]}}});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── F1 Gare passate stagione corrente ────────────────────────────────────────
+app.get('/sport/f1/past',async(req,res)=>{
+  try{
+    // Jolpica: tutte le gare della stagione corrente con risultati
+    const cal=await ergast(`/${F1Y}`).catch(()=>null);
+    const allRaces=cal?.MRData?.RaceTable?.Races||[];
+    const now=new Date();
+    const past=allRaces.filter(r=>new Date(r.date)<now);
+    if(past.length===0) return res.json({races:[]});
+    // Prendi top3 per ogni gara passata (in parallelo, max 5 gare)
+    const toFetch=past.slice(-5).reverse(); // ultime 5, dalla più recente
+    const withResults=await Promise.all(toFetch.map(async r=>{
+      try{
+        const d=await ergast(`/${F1Y}/${r.round}/results`,300000);
+        const results=(d?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,3).map(res=>({
+          position:res.position,
+          driver:res.Driver?.familyName||'',
+          constructor:res.Constructor?.name||'',
+          points:res.points||'0',
+        }));
+        return{...r,results};
+      }catch{return{...r,results:[]};}
+    }));
+    res.json({races:withResults});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1186,16 +1160,16 @@ app.get('/sport/motogp/table',async(req,res)=>{
     }catch{}
     // Classifica 2026 dopo Thai GP (Round 1) — aggiornare dopo ogni gara
     return res.json({table:[
-      {intRank:'1',strTeam:'Marc Márquez',     intPoints:'25',intPlayed:'1'},
-      {intRank:'2',strTeam:'Pecco Bagnaia',    intPoints:'20',intPlayed:'1'},
-      {intRank:'3',strTeam:'Jorge Martín',     intPoints:'16',intPlayed:'1'},
-      {intRank:'4',strTeam:'Enea Bastianini',  intPoints:'13',intPlayed:'1'},
-      {intRank:'5',strTeam:'Pedro Acosta',     intPoints:'11',intPlayed:'1'},
-      {intRank:'6',strTeam:'Brad Binder',      intPoints:'10',intPlayed:'1'},
-      {intRank:'7',strTeam:'Fabio Quartararo', intPoints:'9', intPlayed:'1'},
-      {intRank:'8',strTeam:'Alex Márquez',     intPoints:'8', intPlayed:'1'},
-      {intRank:'9',strTeam:'Franco Morbidelli',intPoints:'7', intPlayed:'1'},
-      {intRank:'10',strTeam:'Maverick Viñales',intPoints:'6', intPlayed:'1'},
+      {intRank:'1', strTeam:'Pedro Acosta',         intPoints:'45',intPlayed:'1'},
+      {intRank:'2', strTeam:'Marco Bezzecchi',       intPoints:'37',intPlayed:'1'},
+      {intRank:'3', strTeam:'Raul Fernandez',         intPoints:'28',intPlayed:'1'},
+      {intRank:'4', strTeam:'Jorge Martín',           intPoints:'24',intPlayed:'1'},
+      {intRank:'5', strTeam:'Marc Márquez',           intPoints:'20',intPlayed:'1'},
+      {intRank:'6', strTeam:'Ai Ogura',               intPoints:'18',intPlayed:'1'},
+      {intRank:'7', strTeam:'Brad Binder',            intPoints:'17',intPlayed:'1'},
+      {intRank:'8', strTeam:'Fabio Di Giannantonio',  intPoints:'11',intPlayed:'1'},
+      {intRank:'9', strTeam:'Luca Marini',            intPoints:'8', intPlayed:'1'},
+      {intRank:'10',strTeam:'Enea Bastianini',        intPoints:'7', intPlayed:'1'},
     ],season:'2026',note:'dopo Thai GP R1'});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -1239,20 +1213,40 @@ app.get('/sport/motogp/last',async(req,res)=>{
     // Hardcoded Thai GP 2026 (Round 1 — 1 marzo 2026)
     if(lastRace.round===1){
       return res.json({race:lastRace,results:[
-        {position:'1',name:'Marc Márquez',     abbr:'MM93',team:'Gresini Racing',    points:'25'},
-        {position:'2',name:'Francesco Bagnaia',abbr:'PB63',team:'Ducati Lenovo',     points:'20'},
-        {position:'3',name:'Jorge Martín',     abbr:'JM89',team:'Aprilia Racing',    points:'16'},
-        {position:'4',name:'Enea Bastianini',  abbr:'EB23',team:'Monster Yamaha',    points:'13'},
-        {position:'5',name:'Pedro Acosta',     abbr:'PA31',team:'GASGAS Tech3',      points:'11'},
-        {position:'6',name:'Brad Binder',      abbr:'BB33',team:'Red Bull KTM',      points:'10'},
-        {position:'7',name:'Fabio Quartararo', abbr:'FQ20',team:'Monster Yamaha',    points:'9'},
-        {position:'8',name:'Alex Márquez',     abbr:'AM73',team:'Gresini Racing',    points:'8'},
-        {position:'9',name:'Franco Morbidelli',abbr:'FM21',team:'Prima Pramac',      points:'7'},
-        {position:'10',name:'Maverick Viñales',abbr:'MV12',team:'Aprilia Racing',    points:'6'},
+        {position:'1',name:'Marco Bezzecchi',  abbr:'MB72',team:'Aprilia Racing',   points:'25'},
+        {position:'2',name:'Pedro Acosta',      abbr:'PA31',team:'Red Bull KTM',     points:'20'},
+        {position:'3',name:'Raul Fernandez',    abbr:'RF25',team:'Trackhouse Aprilia',points:'16'},
+        {position:'4',name:'Jorge Martín',      abbr:'JM89',team:'Aprilia Racing',   points:'13'},
+        {position:'5',name:'Ai Ogura',          abbr:'AO79',team:'Trackhouse Aprilia',points:'11'},
+        {position:'6',name:'Brad Binder',       abbr:'BB33',team:'Red Bull KTM',     points:'10'},
+        {position:'7',name:'Fabio Di Giannantonio',abbr:'FD49',team:'Pertamina VR46',points:'9'},
+        {position:'8',name:'Luca Marini',       abbr:'LM10',team:'Honda HRC',        points:'8'},
+        {position:'9',name:'Enea Bastianini',   abbr:'EB23',team:'GASGAS Tech3',     points:'7'},
+        {position:'10',name:'Maverick Viñales', abbr:'MV12',team:'GASGAS Tech3',     points:'6'},
       ]});
     }
     res.json({race:lastRace,results:[]});
   }catch(e){res.status(500).json({error:e.message});}
+});
+
+// ── MotoGP Gare passate stagione corrente ────────────────────────────────────
+app.get('/sport/motogp/past',async(req,res)=>{
+  const now=new Date();
+  const past=MOTOGP_2026
+    .filter(r=>new Date(r.dateEvent)<now)
+    .sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent)); // più recente prima
+  // Aggiungi risultati hardcoded per gare già note
+  const withResults=past.map(r=>{
+    if(r.round===1){
+      return{...r,results:[
+        {position:'1',name:'Marc Márquez',team:'Ducati Gresini'},
+        {position:'2',name:'Alex Márquez',team:'Ducati Gresini'},
+        {position:'3',name:'Francesco Bagnaia',team:'Ducati Lenovo'},
+      ]};
+    }
+    return{...r,results:[]};
+  });
+  res.json({races:withResults});
 });
 
 // ── MotoGP Live ───────────────────────────────────────────────────────────────
@@ -1605,19 +1599,25 @@ const PORT=process.env.PORT||10000;
 // MONDIALI 2026 — USA/Canada/Messico, 11 giu – 19 lug 2026
 // ══════════════════════════════════════════════════════════════════════════════
 const WC2026_GROUPS={
-  A:[{t:'USA'},{t:'Portogallo'},{t:'Marocco'},{t:'Egitto'}],
-  B:[{t:'Messico'},{t:'Argentina'},{t:'Cile'},{t:'Belgio'}],
-  C:[{t:'Canada'},{t:'Inghilterra'},{t:'Olanda'},{t:'Senegal'}],
-  D:[{t:'Brasile'},{t:'Francia'},{t:'Svizzera'},{t:'Giappone'}],
-  E:[{t:'Spagna'},{t:'Germania'},{t:'Algeria'},{t:'Canada_B'}],
-  F:[{t:'Uruguay'},{t:'Colombia'},{t:'Corea del Sud'},{t:'Nigeria'}],
-  G:[{t:'Polonia'},{t:'Ecuador'},{t:'Australia'},{t:'Costa Rica'}],
-  H:[{t:'Italia'},{t:'Turchia'},{t:'Messico_B'},{t:'Arabia Saudita'}],
-  I:[{t:'Iran'},{t:'Qatar'},{t:'Croazia'},{t:'Costa Avorio'}],
-  J:[{t:'Danimarca'},{t:'Camerun'},{t:'Venezuela'},{t:'Arabia_B'}],
-  K:[{t:'Serbia'},{t:'Perù'},{t:'Nuova Zelanda'},{t:'Congo'}],
-  L:[{t:'Austria'},{t:'Ucraina'},{t:'Ghana'},{t:'Panama'}],
+  A:[{t:'Messico'},{t:'Corea del Sud'},{t:'Sudafrica'},{t:'Playoff D*'}],
+  B:[{t:'Canada'},{t:'Svizzera'},{t:'Qatar'},{t:'Playoff A*'}],
+  C:[{t:'Brasile'},{t:'Marocco'},{t:'Scozia'},{t:'Haiti'}],
+  D:[{t:'USA'},{t:'Australia'},{t:'Paraguay'},{t:'Playoff C*'}],
+  E:[{t:'Germania'},{t:'Ecuador'},{t:'Costa Avorio'},{t:'Curacao'}],
+  F:[{t:'Olanda'},{t:'Giappone'},{t:'Tunisia'},{t:'Playoff B*'}],
+  G:[{t:'Belgio'},{t:'Iran'},{t:'Egitto'},{t:'Nuova Zelanda'}],
+  H:[{t:'Spagna'},{t:'Uruguay'},{t:'Arabia Saudita'},{t:'Capo Verde'}],
+  I:[{t:'Francia'},{t:'Senegal'},{t:'Norvegia'},{t:'Playoff F*'}],
+  J:[{t:'Argentina'},{t:'Algeria'},{t:'Austria'},{t:'Giordania'}],
+  K:[{t:'Portogallo'},{t:'Colombia'},{t:'Uzbekistan'},{t:'Playoff E*'}],
+  L:[{t:'Inghilterra'},{t:'Croazia'},{t:'Panama'},{t:'Ghana'}],
 };
+// * Playoff A = Italia/Irlanda del Nord/Galles/Bosnia
+// * Playoff B = Ucraina/Svezia/Polonia/Albania
+// * Playoff C = Turchia/Romania/Slovacchia/Kosovo
+// * Playoff D = Danimarca/Macedonia del Nord/Rep.Ceca/Irlanda
+// * Playoff E = Congo/Giamaica/Nuova Caledonia
+// * Playoff F = Bolivia/Suriname/Iraq
 // Partite gironi (date ufficiali parziali, alcune stimate)
 const WC2026_MATCHES=[
   // Girone A
