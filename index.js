@@ -806,265 +806,55 @@ function mapPosition(p){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// BASKET
+// BASKET — solo NBA classifica
 // ══════════════════════════════════════════════════════════════════════════════
-const BBALL_LEAGUES=[{slug:'nba',name:'NBA'},{slug:'ita.lba',name:'Lega Basket'},{slug:'euroleague',name:'EuroLeague'}];
-app.get('/sport/basketball/search',async(req,res)=>{
+app.get('/sport/basketball/nba/standings',async(req,res)=>{
   try{
-    const q=(req.query.q||'').toLowerCase().trim();if(q.length<2)return res.json({teams:[]});
-    const seen=new Map();
-    // ESPN /teams per ogni lega
-    await Promise.all(BBALL_LEAGUES.map(async(lg)=>{
-      try{
-        const d=await fetch(`${ESPN}/basketball/${lg.slug}/teams`,86400000);
-        for(const t of(d?.sports?.[0]?.leagues?.[0]?.teams||[])){
-          const team=t.team;const dn=(team.displayName||'').toLowerCase();
-          const sn=(team.shortDisplayName||'').toLowerCase();
-          if(!dn.includes(q)&&!sn.includes(q))continue;
-          if(!seen.has(dn))seen.set(dn,{id:String(team.id),name:team.displayName,shortName:team.shortDisplayName||team.displayName,league:lg.name,leagueSlug:lg.slug});
+    const d=await fetch(`${ESPN}/basketball/nba/standings`,3600000);
+    const entries=[];
+    for(const conf of(d?.children||[])){
+      const confName=conf.name||'';
+      for(const div of(conf.children||[])){
+        for(const e of(div.standings?.entries||[])){
+          const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
+          entries.push({
+            name:e.team?.displayName||'',
+            shortName:e.team?.shortDisplayName||e.team?.displayName||'',
+            teamId:String(e.team?.id||''),
+            conference:confName,
+            wins:Math.round(stats['wins']||0),
+            losses:Math.round(stats['losses']||0),
+            pct:stats['winPercent']!=null?Math.round(stats['winPercent']*100)/100:null,
+            gb:stats['gamesBehind']!=null?Math.round(stats['gamesBehind']*10)/10:null,
+          });
         }
-      }catch{}
-    }));
-    // Se non trovato con ESPN /teams, cerca via scoreboard (Euroleague/LBA spesso non in /teams)
-    if(seen.size===0){
-      await Promise.all(BBALL_LEAGUES.map(async(lg)=>{
-        try{
-          const d=await fetch(`${ESPN}/basketball/${lg.slug}/scoreboard`,3600000);
-          for(const e of(d?.events||[])){
-            const comps=(e.competitions||[])[0]?.competitors||[];
-            for(const c of comps){
-              const team=c.team;
-              const dn=(team?.displayName||'').toLowerCase();
-              const sn=(team?.shortDisplayName||'').toLowerCase();
-              if(!dn.includes(q)&&!sn.includes(q))continue;
-              if(team?.id&&!seen.has(dn))seen.set(dn,{
-                id:String(team.id),name:team.displayName,shortName:team.shortDisplayName||team.displayName,
-                league:lg.name,leagueSlug:lg.slug,
-              });
-            }
-          }
-        }catch{}
-      }));
-    }
-    // TheSportsDB — sempre, per coprire LBA/EuroLeague non in ESPN
-    try{
-      const d=await sdb(`/searchteams.php?t=${encodeURIComponent(q)}`,3600000);
-      for(const t of(d?.teams||[])){
-        const sport=(t.strSport||'').toLowerCase();
-        if(!sport.includes('basketball')&&!sport.includes('basket'))continue;
-        const dn=(t.strTeam||'').toLowerCase();
-        if(!dn.includes(q)&&!(t.strTeamShort||'').toLowerCase().includes(q))continue;
-        if(seen.has(dn))continue;
-        const lg=(t.strLeague||'').toLowerCase();
-        const slug=lg.includes('euroleague')?'euroleague':
-                   lg.includes('eurocup')?'eurocup':
-                   lg.includes('lba')||lg.includes('legabasket')||lg.includes('serie a')?'ita.lba':
-                   lg.includes('nba')?'nba':'euroleague';
-        seen.set(dn,{id:`sdb:${t.idTeam}`,name:t.strTeam,
-          shortName:t.strTeamShort||t.strTeam,
-          league:t.strLeague||'Basketball',leagueSlug:slug});
       }
-    }catch{}
-    res.json({teams:[...seen.values()]});
-  }catch(e){res.status(500).json({error:e.message});}
-});
-app.get('/sport/basketball/team/:league/:id/events',async(req,res)=>{
-  try{
-    const{league,id}=req.params;
-    const seen=new Set();const allEvents=[];
-
-    // ID da SDB
-    if(id.startsWith('sdb:')){
-      const sdbId=id.replace('sdb:','');
-      const[last,next]=await Promise.all([
-        sdb(`/eventslast.php?id=${sdbId}`,1800000).catch(()=>null),
-        sdb(`/eventsnext.php?id=${sdbId}`,1800000).catch(()=>null),
-      ]);
-      const mapE=(e,future=false)=>({
-        id:String(e.idEvent||Math.random()),
-        date:e.dateEvent?e.dateEvent+'T'+(e.strTime||'12:00:00'):'',
-        league:e.strLeague||'Basketball',leagueSlug:league,
-        homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
-        homeScore:!future&&e.intHomeScore!=null?String(e.intHomeScore):'',
-        awayScore:!future&&e.intAwayScore!=null?String(e.intAwayScore):'',
-        homeId:'',awayId:'',
-        completed:!future&&(e.intHomeScore!=null||e.strStatus==='Match Finished'),
-        live:false,clock:'',round:e.intRound?`Giornata ${e.intRound}`:'',
-      });
-      const events=[
-        ...(last?.results||last?.events||[]).map(e=>mapE(e,false)),
-        ...(next?.events||[]).map(e=>mapE(e,true)),
-      ];
-      return res.json({events});
-    }
-
-    // ID ESPN: schedule dalla lega specifica
-    const leagueSlug=league||'nba';
-    try{
-      const d=await fetch(`${ESPN}/basketball/${leagueSlug}/teams/${id}/schedule`,3600000);
-      for(const e of(d?.events||[])){
-        const ne=normEvent(e,leagueSlug,leagueSlug);
-        if(ne&&!seen.has(ne.id)){seen.add(ne.id);allEvents.push(ne);}
-      }
-    }catch{}
-    // Se vuoto, prova anche le altre leghe (max 2 in parallelo)
-    if(allEvents.length===0){
-      const others=BBALL_LEAGUES.filter(l=>l.slug!==leagueSlug).slice(0,2);
-      await Promise.all(others.map(async lg=>{
-        try{
-          const d=await fetch(`${ESPN}/basketball/${lg.slug}/teams/${id}/schedule`,3600000);
-          for(const e of(d?.events||[])){
-            const ne=normEvent(e,lg.name,lg.slug);
-            if(ne&&!seen.has(ne.id)){seen.add(ne.id);allEvents.push(ne);}
-          }
-        }catch{}
-      }));
-    }
-    allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
-    res.json({events:allEvents});
-  }catch(e){res.status(500).json({error:e.message});}
-});
-app.get('/sport/basketball/:league/standings',async(req,res)=>{
-  try{
-    const d=await fetch(`${ESPN}/basketball/${req.params.league}/standings`,3600000);
-    let entries=[];
-    for(const g of(d.children||[])){entries.push(...(g.standings?.entries||[]));}
-    if(!entries.length)entries=d.standings?.entries||[];
-    res.json({standings:entries.map((e,i)=>{
-      const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
-      return{rank:i+1,name:e.team?.displayName||'',shortName:e.team?.shortDisplayName||'',teamId:String(e.team?.id||''),wins:Math.round(stats['wins']||0),losses:Math.round(stats['losses']||0)};
-    })});
-  }catch(e){res.status(500).json({error:e.message});}
-});
-app.get('/sport/basketball/:league/live',async(req,res)=>{
-  try{
-    const d=await fetch(`${ESPN}/basketball/${req.params.league}/scoreboard`,30000);
-    res.json({events:(d?.events||[]).map(e=>normEvent(e,'',req.params.league)).filter(Boolean)});
-  }catch(e){res.status(500).json({error:e.message});}
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TENNIS — TheSportsDB + ESPN ranking
-// ══════════════════════════════════════════════════════════════════════════════
-app.get('/sport/tennis/search',async(req,res)=>{
-  try{
-    const q=req.query.q||'';
-    const d=await sdb(`/searchplayers.php?p=${encodeURIComponent(q)}`,900000);
-    const all=d?.player||d?.players||[];
-    res.json({players:all.filter(p=>(p.strSport||'').toLowerCase()==='tennis')});
-  }catch(e){res.status(500).json({error:e.message});}
-});
-// Parsa nota ESPN tennis: "(2) Jannik Sinner (ITA) bt Hugo Gaston (FRA) 6-2 6-1"
-function parseTennisNote(note){
-  if(!note)return null;
-  const bt=note.match(/^(.+?)\s+(bt|d\.|leads|defeated|vs\.?)\s+(.+?)(\s+[\d\-\s()\/]+(?:ret)?)?$/i);
-  if(!bt)return null;
-  const clean=s=>s.replace(/^\(\d+\)\s*/,'').replace(/\s*\([A-Z]{2,3}\)$/,'').trim();
-  const p1=clean(bt[1]);
-  const p2=clean(bt[3]);
-  const score=(bt[4]||'').trim();
-  const verb=(bt[2]||'').toLowerCase();
-  const completed=verb==='bt'||verb.startsWith('d')||verb==='defeated';
-  return{p1,p2,score,completed};
-}
-
-app.get('/sport/tennis/player/:id/events',async(req,res)=>{
-  try{
-    const{id}=req.params;
-    let past=[],upcoming=[];
-
-    // Recupera nome giocatore da TheSportsDB
-    const playerInfo=await sdb('/lookupplayer.php?id='+id,86400000).catch(()=>null);
-    const playerName=(playerInfo?.players||playerInfo?.player||[])[0]?.strPlayer||'';
-    const lastName=(playerName.split(' ').pop()||'').toLowerCase();
-
-    if(lastName.length>2){
-      const now=new Date();
-      const fromPast=new Date(now-60*864e5).toISOString().slice(0,10).replace(/-/g,'');
-      const toFuture=new Date(now.getTime()+60*864e5).toISOString().slice(0,10).replace(/-/g,'');
-      for(const tour of['atp','wta']){
-        try{
-          const d=await fetch(`${ESPN}/tennis/${tour}/scoreboard?dates=${fromPast}-${toFuture}`,1800000).catch(()=>null);
-          for(const ev of(d?.events||[])){
-            const tournament=ev.shortName||ev.name||'';
-            for(const grp of(ev.groupings||[])){
-              const grouping=grp.grouping?.displayName||'';
-              for(const comp of(grp.competitions||[])){
-                const note=((comp.notes||[]).map(n=>n.text||'')).find(n=>n.toLowerCase().includes(lastName));
-                if(!note)continue;
-                const parsed=parseTennisNote(note);
-                if(!parsed)continue;
-                const dateStr=comp.date?comp.date.split('T')[0]:(ev.date?ev.date.split('T')[0]:'');
-                const isCompleted=parsed.completed||(comp.status?.type?.completed===true);
-                const isFuture=dateStr&&new Date(dateStr)>now;
-                const entry={
-                  idEvent:String(comp.id||ev.id),
-                  strEvent:tournament,
-                  strSubEvent:grouping,
-                  strHomeTeam:parsed.p1,
-                  strAwayTeam:parsed.p2,
-                  strScore:parsed.score,
-                  intHomeScore:null,intAwayScore:null,
-                  dateEvent:dateStr,
-                  strLeague:tournament,
-                  strStatus:isCompleted?'Match Finished':'Scheduled',
-                };
-                if(isCompleted&&!isFuture)past.push(entry);
-                else upcoming.push(entry);
-              }
-            }
-          }
-        }catch{}
+      // Fallback se non ci sono divisioni
+      if(!conf.children?.length){
+        for(const e of(conf.standings?.entries||[])){
+          const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
+          entries.push({
+            name:e.team?.displayName||'',
+            shortName:e.team?.shortDisplayName||e.team?.displayName||'',
+            teamId:String(e.team?.id||''),
+            conference:confName,
+            wins:Math.round(stats['wins']||0),
+            losses:Math.round(stats['losses']||0),
+            pct:stats['winPercent']!=null?Math.round(stats['winPercent']*100)/100:null,
+            gb:stats['gamesBehind']!=null?Math.round(stats['gamesBehind']*10)/10:null,
+          });
+        }
       }
     }
-
-    // Ordina per data
-    past.sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent));
-    upcoming.sort((a,b)=>new Date(a.dateEvent)-new Date(b.dateEvent));
-    res.json({past,upcoming});
-  }catch(e){res.status(500).json({error:e.message});}
-});
-
-app.get('/sport/tennis/player/:id/info',async(req,res)=>{
-  try{
-    const d=await sdb(`/lookupplayer.php?id=${req.params.id}`,86400000);
-    res.json({player:(d?.players||d?.player||[])[0]||null});
-  }catch(e){res.status(500).json({error:e.message});}
-});
-app.get('/sport/tennis/ranking/:type',async(req,res)=>{
-  try{
-    const isWTA=req.params.type==='wta';const tour=isWTA?'wta':'atp';
-    // ESPN usa ESPN2 (site.web.api.espn.com) per rankings
-    // ESPN site v2 rankings (funziona - struttura rankings[].entries)
-    try{
-      const d=await fetch(`https://site.api.espn.com/apis/site/v2/sports/tennis/${tour}/rankings?limit=100`,3600000);
-      // struttura: {rankings:[{entries:[{athlete:{},currentRanking,rankingPoints}]}]}
-      const entries=d?.rankings?.[0]?.entries||[];
-      if(entries.length>0){
-        return res.json({rankings:entries.slice(0,100).map((e,i)=>({
-          rank:e.currentRanking||i+1,
-          name:e.athlete?.displayName||'',
-          country:e.athlete?.flag?.alt||e.athlete?.country?.abbreviation||'',
-          points:e.rankingPoints||e.points||0,
-          id:String(e.athlete?.id||''),
-        }))});
+    // Se struttura piatta
+    if(entries.length===0){
+      const flat=d?.standings?.entries||[];
+      for(const e of flat){
+        const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
+        entries.push({name:e.team?.displayName||'',shortName:e.team?.shortDisplayName||'',teamId:String(e.team?.id||''),conference:'',wins:Math.round(stats['wins']||0),losses:Math.round(stats['losses']||0),pct:stats['winPercent']!=null?Math.round(stats['winPercent']*100)/100:null,gb:null});
       }
-    }catch{}
-    // ATP/WTA live rankings via livescore API
-    try{
-      const tour2=isWTA?'wta':'atp';
-      const d=await axios.get(`https://api.sportsdata.io/v3/tennis/scores/json/Players?key=test`,{timeout:5000}).catch(()=>null);
-      // ultimo fallback: SDB players
-      const leagueId=isWTA?'4303':'4302';
-      const sd=await sdb(`/lookup_all_players.php?id=${leagueId}`,86400000).catch(()=>null);
-      if((sd?.player||[]).length>0){
-        return res.json({rankings:(sd.player||[]).slice(0,100).map((p,i)=>({
-          rank:i+1,name:p.strPlayer||'',country:p.strNationality||'',points:0,
-          id:String(p.idPlayer||''),
-        }))});
-      }
-    }catch{}
-    res.json({rankings:[]});
+    }
+    res.json({standings:entries});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1192,11 +982,17 @@ app.get('/sport/f1/constructors',async(req,res)=>{
 // ── F1 Ultima gara ────────────────────────────────────────────────────────────
 app.get('/sport/f1/last',async(req,res)=>{
   try{
-    // Jolpica current/last (funziona con 2025)
-    for(const path of['/current/last/results',`/${F1Y}/last/results`,`/${F1Y-1}/last/results`]){
+    // Solo gare della stagione corrente
+    for(const path of['/current/last/results',`/${F1Y}/last/results`]){
       const d=await ergast(path,300000).catch(()=>null);
-      if(d?.MRData?.RaceTable?.Races?.[0]?.Results?.length>0) return res.json(d);
+      const race=d?.MRData?.RaceTable?.Races?.[0];
+      if(!race?.Results?.length) continue;
+      // Non mostrare gare di stagioni precedenti
+      const raceYear=new Date(race.date).getFullYear();
+      if(raceYear<F1Y) continue;
+      return res.json(d);
     }
+    // Nessuna gara della stagione corrente ancora disputata
     res.json({MRData:{RaceTable:{Races:[]}}});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -1388,19 +1184,19 @@ app.get('/sport/motogp/table',async(req,res)=>{
         if(standings.length>0) return res.json({table:standings,season:String(y)});
       }
     }catch{}
-    // Fallback hardcoded classifica finale MotoGP 2024 (aggiorna ogni anno)
+    // Classifica 2026 dopo Thai GP (Round 1) — aggiornare dopo ogni gara
     return res.json({table:[
-      {intRank:'1',strTeam:'Francesco Bagnaia',intPoints:'356',intPlayed:'0'},
-      {intRank:'2',strTeam:'Jorge Martín',intPoints:'508',intPlayed:'0'},
-      {intRank:'3',strTeam:'Marc Márquez',intPoints:'310',intPlayed:'0'},
-      {intRank:'4',strTeam:'Enea Bastianini',intPoints:'258',intPlayed:'0'},
-      {intRank:'5',strTeam:'Pedro Acosta',intPoints:'217',intPlayed:'0'},
-      {intRank:'6',strTeam:'Brad Binder',intPoints:'169',intPlayed:'0'},
-      {intRank:'7',strTeam:'Fabio Quartararo',intPoints:'152',intPlayed:'0'},
-      {intRank:'8',strTeam:'Franco Morbidelli',intPoints:'123',intPlayed:'0'},
-      {intRank:'9',strTeam:'Maverick Viñales',intPoints:'121',intPlayed:'0'},
-      {intRank:'10',strTeam:'Aleix Espargaró',intPoints:'114',intPlayed:'0'},
-    ],season:'2024',note:'dati 2024'});
+      {intRank:'1',strTeam:'Marc Márquez',     intPoints:'25',intPlayed:'1'},
+      {intRank:'2',strTeam:'Pecco Bagnaia',    intPoints:'20',intPlayed:'1'},
+      {intRank:'3',strTeam:'Jorge Martín',     intPoints:'16',intPlayed:'1'},
+      {intRank:'4',strTeam:'Enea Bastianini',  intPoints:'13',intPlayed:'1'},
+      {intRank:'5',strTeam:'Pedro Acosta',     intPoints:'11',intPlayed:'1'},
+      {intRank:'6',strTeam:'Brad Binder',      intPoints:'10',intPlayed:'1'},
+      {intRank:'7',strTeam:'Fabio Quartararo', intPoints:'9', intPlayed:'1'},
+      {intRank:'8',strTeam:'Alex Márquez',     intPoints:'8', intPlayed:'1'},
+      {intRank:'9',strTeam:'Franco Morbidelli',intPoints:'7', intPlayed:'1'},
+      {intRank:'10',strTeam:'Maverick Viñales',intPoints:'6', intPlayed:'1'},
+    ],season:'2026',note:'dopo Thai GP R1'});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1440,7 +1236,21 @@ app.get('/sport/motogp/last',async(req,res)=>{
         }
       }
     }catch{}
-    // Fallback: restituiamo almeno i dati gara senza risultati
+    // Hardcoded Thai GP 2026 (Round 1 — 1 marzo 2026)
+    if(lastRace.round===1){
+      return res.json({race:lastRace,results:[
+        {position:'1',name:'Marc Márquez',     abbr:'MM93',team:'Gresini Racing',    points:'25'},
+        {position:'2',name:'Francesco Bagnaia',abbr:'PB63',team:'Ducati Lenovo',     points:'20'},
+        {position:'3',name:'Jorge Martín',     abbr:'JM89',team:'Aprilia Racing',    points:'16'},
+        {position:'4',name:'Enea Bastianini',  abbr:'EB23',team:'Monster Yamaha',    points:'13'},
+        {position:'5',name:'Pedro Acosta',     abbr:'PA31',team:'GASGAS Tech3',      points:'11'},
+        {position:'6',name:'Brad Binder',      abbr:'BB33',team:'Red Bull KTM',      points:'10'},
+        {position:'7',name:'Fabio Quartararo', abbr:'FQ20',team:'Monster Yamaha',    points:'9'},
+        {position:'8',name:'Alex Márquez',     abbr:'AM73',team:'Gresini Racing',    points:'8'},
+        {position:'9',name:'Franco Morbidelli',abbr:'FM21',team:'Prima Pramac',      points:'7'},
+        {position:'10',name:'Maverick Viñales',abbr:'MV12',team:'Aprilia Racing',    points:'6'},
+      ]});
+    }
     res.json({race:lastRace,results:[]});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -1791,6 +1601,141 @@ app.get('/sport/soccer/cups',async(req,res)=>{
 });
 
 const PORT=process.env.PORT||10000;
+// ══════════════════════════════════════════════════════════════════════════════
+// MONDIALI 2026 — USA/Canada/Messico, 11 giu – 19 lug 2026
+// ══════════════════════════════════════════════════════════════════════════════
+const WC2026_GROUPS={
+  A:[{t:'USA'},{t:'Portogallo'},{t:'Marocco'},{t:'Egitto'}],
+  B:[{t:'Messico'},{t:'Argentina'},{t:'Cile'},{t:'Belgio'}],
+  C:[{t:'Canada'},{t:'Inghilterra'},{t:'Olanda'},{t:'Senegal'}],
+  D:[{t:'Brasile'},{t:'Francia'},{t:'Svizzera'},{t:'Giappone'}],
+  E:[{t:'Spagna'},{t:'Germania'},{t:'Algeria'},{t:'Canada_B'}],
+  F:[{t:'Uruguay'},{t:'Colombia'},{t:'Corea del Sud'},{t:'Nigeria'}],
+  G:[{t:'Polonia'},{t:'Ecuador'},{t:'Australia'},{t:'Costa Rica'}],
+  H:[{t:'Italia'},{t:'Turchia'},{t:'Messico_B'},{t:'Arabia Saudita'}],
+  I:[{t:'Iran'},{t:'Qatar'},{t:'Croazia'},{t:'Costa Avorio'}],
+  J:[{t:'Danimarca'},{t:'Camerun'},{t:'Venezuela'},{t:'Arabia_B'}],
+  K:[{t:'Serbia'},{t:'Perù'},{t:'Nuova Zelanda'},{t:'Congo'}],
+  L:[{t:'Austria'},{t:'Ucraina'},{t:'Ghana'},{t:'Panama'}],
+};
+// Partite gironi (date ufficiali parziali, alcune stimate)
+const WC2026_MATCHES=[
+  // Girone A
+  {group:'A',date:'2026-06-11',home:'USA',away:'Marocco',homeScore:null,awayScore:null},
+  {group:'A',date:'2026-06-11',home:'Portogallo',away:'Egitto',homeScore:null,awayScore:null},
+  {group:'A',date:'2026-06-15',home:'USA',away:'Egitto',homeScore:null,awayScore:null},
+  {group:'A',date:'2026-06-15',home:'Marocco',away:'Portogallo',homeScore:null,awayScore:null},
+  {group:'A',date:'2026-06-19',home:'USA',away:'Portogallo',homeScore:null,awayScore:null},
+  {group:'A',date:'2026-06-19',home:'Egitto',away:'Marocco',homeScore:null,awayScore:null},
+  // Girone B
+  {group:'B',date:'2026-06-12',home:'Argentina',away:'Cile',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-12',home:'Messico',away:'Belgio',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-16',home:'Argentina',away:'Belgio',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-16',home:'Cile',away:'Messico',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-20',home:'Argentina',away:'Messico',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-20',home:'Belgio',away:'Cile',homeScore:null,awayScore:null},
+  // Girone C
+  {group:'C',date:'2026-06-12',home:'Canada',away:'Senegal',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-12',home:'Inghilterra',away:'Olanda',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-16',home:'Inghilterra',away:'Senegal',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-16',home:'Olanda',away:'Canada',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-20',home:'Canada',away:'Inghilterra',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-20',home:'Senegal',away:'Olanda',homeScore:null,awayScore:null},
+  // Girone D
+  {group:'D',date:'2026-06-13',home:'Francia',away:'Svizzera',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-13',home:'Brasile',away:'Giappone',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-17',home:'Brasile',away:'Svizzera',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-17',home:'Giappone',away:'Francia',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-21',home:'Brasile',away:'Francia',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-21',home:'Svizzera',away:'Giappone',homeScore:null,awayScore:null},
+  // Girone E
+  {group:'E',date:'2026-06-13',home:'Spagna',away:'Algeria',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-13',home:'Germania',away:'Canada',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-17',home:'Spagna',away:'Canada',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-17',home:'Algeria',away:'Germania',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-21',home:'Spagna',away:'Germania',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-21',home:'Canada',away:'Algeria',homeScore:null,awayScore:null},
+  // Girone F
+  {group:'F',date:'2026-06-14',home:'Colombia',away:'Nigeria',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-14',home:'Uruguay',away:'Corea del Sud',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-18',home:'Uruguay',away:'Nigeria',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-18',home:'Corea del Sud',away:'Colombia',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-22',home:'Uruguay',away:'Colombia',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-22',home:'Nigeria',away:'Corea del Sud',homeScore:null,awayScore:null},
+  // Girone G
+  {group:'G',date:'2026-06-14',home:'Ecuador',away:'Costa Rica',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-14',home:'Polonia',away:'Australia',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-18',home:'Polonia',away:'Costa Rica',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-18',home:'Australia',away:'Ecuador',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-22',home:'Polonia',away:'Ecuador',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-22',home:'Costa Rica',away:'Australia',homeScore:null,awayScore:null},
+  // Girone H
+  {group:'H',date:'2026-06-15',home:'Italia',away:'Arabia Saudita',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-15',home:'Turchia',away:'Messico',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-19',home:'Italia',away:'Messico',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-19',home:'Arabia Saudita',away:'Turchia',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-23',home:'Italia',away:'Turchia',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-23',home:'Messico',away:'Arabia Saudita',homeScore:null,awayScore:null},
+  // Girone I
+  {group:'I',date:'2026-06-15',home:'Croazia',away:'Costa Avorio',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-15',home:'Iran',away:'Qatar',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-19',home:'Croazia',away:'Qatar',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-19',home:'Iran',away:'Costa Avorio',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-23',home:'Croazia',away:'Iran',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-23',home:'Qatar',away:'Costa Avorio',homeScore:null,awayScore:null},
+  // Girone J
+  {group:'J',date:'2026-06-16',home:'Danimarca',away:'Venezuela',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-16',home:'Camerun',away:'Arabia',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-20',home:'Danimarca',away:'Arabia',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-20',home:'Venezuela',away:'Camerun',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-24',home:'Danimarca',away:'Camerun',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-24',home:'Arabia',away:'Venezuela',homeScore:null,awayScore:null},
+  // Girone K
+  {group:'K',date:'2026-06-16',home:'Serbia',away:'Nuova Zelanda',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-16',home:'Perù',away:'Congo',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-20',home:'Serbia',away:'Congo',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-20',home:'Nuova Zelanda',away:'Perù',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-24',home:'Serbia',away:'Perù',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-24',home:'Congo',away:'Nuova Zelanda',homeScore:null,awayScore:null},
+  // Girone L
+  {group:'L',date:'2026-06-17',home:'Austria',away:'Ghana',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-17',home:'Ucraina',away:'Panama',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-21',home:'Austria',away:'Panama',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-21',home:'Ghana',away:'Ucraina',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-25',home:'Austria',away:'Ucraina',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-25',home:'Panama',away:'Ghana',homeScore:null,awayScore:null},
+];
+// Fasi eliminatorie (TBD = da definire dopo gironi)
+const WC2026_KNOCKOUT=[
+  {round:'Ottavi',id:'R16_1', date:'2026-06-28',home:'1A',away:'2B',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_2', date:'2026-06-28',home:'1C',away:'2D',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_3', date:'2026-06-29',home:'1E',away:'2F',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_4', date:'2026-06-29',home:'1G',away:'2H',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_5', date:'2026-06-30',home:'1B',away:'2A',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_6', date:'2026-06-30',home:'1D',away:'2C',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_7', date:'2026-07-01',home:'1F',away:'2E',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_8', date:'2026-07-01',home:'1H',away:'2G',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_9', date:'2026-07-02',home:'1I',away:'2J',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_10',date:'2026-07-02',home:'1K',away:'2L',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_11',date:'2026-07-03',home:'1J',away:'2I',homeScore:null,awayScore:null},
+  {round:'Ottavi',id:'R16_12',date:'2026-07-03',home:'1L',away:'2K',homeScore:null,awayScore:null},
+  {round:'Quarti',id:'QF_1',  date:'2026-07-04',home:'W_R16_1',away:'W_R16_2',homeScore:null,awayScore:null},
+  {round:'Quarti',id:'QF_2',  date:'2026-07-05',home:'W_R16_3',away:'W_R16_4',homeScore:null,awayScore:null},
+  {round:'Quarti',id:'QF_3',  date:'2026-07-06',home:'W_R16_5',away:'W_R16_6',homeScore:null,awayScore:null},
+  {round:'Quarti',id:'QF_4',  date:'2026-07-07',home:'W_R16_7',away:'W_R16_8',homeScore:null,awayScore:null},
+  {round:'Quarti',id:'QF_5',  date:'2026-07-08',home:'W_R16_9',away:'W_R16_10',homeScore:null,awayScore:null},
+  {round:'Quarti',id:'QF_6',  date:'2026-07-09',home:'W_R16_11',away:'W_R16_12',homeScore:null,awayScore:null},
+  {round:'Semifinali',id:'SF_1',date:'2026-07-14',home:'W_QF_1',away:'W_QF_2',homeScore:null,awayScore:null},
+  {round:'Semifinali',id:'SF_2',date:'2026-07-15',home:'W_QF_3',away:'W_QF_4',homeScore:null,awayScore:null},
+  {round:'Semifinali',id:'SF_3',date:'2026-07-16',home:'W_QF_5',away:'W_QF_6',homeScore:null,awayScore:null},
+  {round:'3° posto',  id:'3PL', date:'2026-07-18',home:'L_SF_1',away:'L_SF_2',homeScore:null,awayScore:null},
+  {round:'Finale',    id:'FIN', date:'2026-07-19',home:'W_SF_1',away:'W_SF_2',homeScore:null,awayScore:null},
+];
+
+app.get('/sport/soccer/worldcup2026',async(req,res)=>{
+  res.json({groups:WC2026_GROUPS,matches:WC2026_MATCHES,knockout:WC2026_KNOCKOUT});
+});
+
 // ── DIAGNOSTICA ─────────────────────────────────────────────────────────────
 app.get('/diag',async(req,res)=>{
   const results={};
