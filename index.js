@@ -1087,5 +1087,64 @@ app.get('/sport/motogp/table',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+// ── CLASSIFICHE GENERALI — tutte le leghe principali ─────────────────────────
+app.get('/sport/soccer/standings/all',async(req,res)=>{
+  const leagues=[
+    {slug:'ita.1',name:'Serie A'},
+    {slug:'ita.2',name:'Serie B'},
+    {slug:'uefa.champions',name:'Champions League'},
+    {slug:'uefa.europa',name:'Europa League'},
+    {slug:'uefa.conference',name:'Conference League'},
+    {slug:'esp.1',name:'La Liga'},
+    {slug:'eng.1',name:'Premier League'},
+    {slug:'ger.1',name:'Bundesliga'},
+    {slug:'fra.1',name:'Ligue 1'},
+  ];
+  const results=await Promise.all(leagues.map(async(lg)=>{
+    try{
+      const yr=new Date().getFullYear();
+      let entries=[];
+      for(const y of[yr,yr-1]){
+        for(const url of[
+          `${ESPN2}/soccer/${lg.slug}/standings?season=${y}`,
+          `${ESPN}/soccer/${lg.slug}/standings`,
+        ]){
+          try{
+            const d=await fetch(url,3600000);
+            for(const g of(d.children||[])){entries.push(...(g.standings?.entries||[]));}
+            if(!entries.length)entries=d.standings?.entries||[];
+            if(entries.length>0)break;
+          }catch{}
+          if(entries.length)break;
+        }
+        if(entries.length)break;
+      }
+      if(!entries.length)return null;
+      return{
+        slug:lg.slug,name:lg.name,
+        standings:entries.map((e,i)=>{
+          const stats={};for(const s of(e.stats||[])){stats[s.name]=s.value;}
+          return{
+            rank:Math.round(stats['rank']||i+1),
+            name:e.team?.displayName||'',
+            shortName:e.team?.shortDisplayName||e.team?.displayName||'',
+            teamId:String(e.team?.id||''),
+            logo:e.team?.logos?.[0]?.href||'',
+            played:Math.round(stats['gamesPlayed']||0),
+            wins:Math.round(stats['wins']||0),
+            draws:Math.round(stats['ties']||stats['draws']||0),
+            losses:Math.round(stats['losses']||0),
+            points:Math.round(stats['points']||0),
+            gd:Math.round(stats['pointDifferential']||0),
+            gf:Math.round(stats['pointsFor']||stats['goalsScored']||0),
+            ga:Math.round(stats['pointsAgainst']||stats['goalsConceded']||0),
+          };
+        }),
+      };
+    }catch{return null;}
+  }));
+  res.json({leagues:results.filter(Boolean)});
+});
+
 const PORT=process.env.PORT||10000;
 app.listen(PORT,()=>console.log(`Proxy porta ${PORT}`));
