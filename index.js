@@ -711,8 +711,11 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
 
 app.get('/sport/soccer/:league/live',async(req,res)=>{
   try{
-    const d=await fetch(`${ESPN}/soccer/${req.params.league}/scoreboard`,30000);
-    res.json({events:(d?.events||[]).map(e=>normEvent(e,'',req.params.league)).filter(Boolean)});
+    // Live: no cache, dati freschi ogni chiamata
+    res.set('Cache-Control','no-store');
+    const url=`${ESPN}/soccer/${req.params.league}/scoreboard`;
+    const r=await axios.get(url,{timeout:8000,headers:{'Cache-Control':'no-cache','Pragma':'no-cache'}});
+    res.json({events:(r.data?.events||[]).map(e=>normEvent(e,'',req.params.league)).filter(Boolean)});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
