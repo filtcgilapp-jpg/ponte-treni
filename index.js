@@ -571,11 +571,16 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
     if(lg?.fd){
       try{
         const year=new Date().getFullYear();
-        const season=year-1; // stagione 2025/26 = season 2025
-        const url=teamId
-          ?`/competitions/${lg.fd}/matches?season=${season}&team=${await getFdTeamId(teamId,'')}`
-          :`/competitions/${lg.fd}/matches?season=${season}`;
-        const d=await fd(url,3600000).catch(()=>null);
+        // Prova season yr-1 poi yr-2 (ECSL 2025 potrebbe non avere dati completi)
+        const trySeasons=[year-1,year-2];
+        let d=null;
+        for(const season of trySeasons){
+          const url=teamId
+            ?`/competitions/${lg.fd}/matches?season=${season}&team=${await getFdTeamId(teamId,'')}`
+            :`/competitions/${lg.fd}/matches?season=${season}`;
+          d=await fd(url,3600000).catch(()=>null);
+          if(d?.matches?.length)break;
+        }
         for(const m of(d?.matches||[])){
           const eid=`fd:${m.id}`;
           if(seen.has(eid))continue;
@@ -1365,7 +1370,9 @@ app.get('/sport/soccer/cups',async(req,res)=>{
       if(lg.fd&&(events.length<3||lg.slug==='uefa.conference')){
         try{
           const yr=new Date().getFullYear();
-          const d=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,7200000).catch(()=>null);
+          // Prova stagione corrente e precedente
+          let d=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,7200000).catch(()=>null);
+          if(!d?.matches?.length) d=await fd(`/competitions/${lg.fd}/matches?season=${yr-2}`,7200000).catch(()=>null);
           for(const m of(d?.matches||[])){
             const eid=`fd:${m.id}`;if(seen.has(eid))continue;seen.add(eid);
             events.push({
