@@ -1798,14 +1798,15 @@ app.get('/diag',async(req,res)=>{
     try{const t=Date.now();const d=await fn();results[name]={ok:true,ms:Date.now()-t,sample:JSON.stringify(d).slice(0,120)};}
     catch(e){results[name]={ok:false,error:e.message};}
   };
-  // F1 ultima gara - struttura raw
-  await test('f1_last_raw',async()=>{const r=await ergast('/current/last/results');const race=r?.MRData?.RaceTable?.Races?.[0];return{raceName:race?.raceName,date:race?.date,results_count:race?.Results?.length,first_result:race?.Results?.[0]?.Driver?.familyName};});
-  // Tennis - struttura raw della risposta site
-  await test('tennis_atp_raw',async()=>{const d=await fetch('https://site.api.espn.com/apis/site/v2/sports/tennis/atp/rankings?limit=3',10000);return{keys:Object.keys(d||{}),rankings_len:d?.rankings?.length,r0_keys:Object.keys(d?.rankings?.[0]||{}),r0_entries:d?.rankings?.[0]?.entries?.length,r0_athletes:d?.rankings?.[0]?.athletes?.length};});
-  // MotoGP standings via motorsportstats (pubblico)
-  await test('moto_stats',async()=>{const d=await axios.get('https://www.motogp.com/api/riders-and-teams/riders?seasonYear=2025&categoryName=MotoGP',{timeout:8000,headers:{'Accept':'application/json','User-Agent':'Mozilla/5.0'}});return{count:d.data?.length||0,first:d.data?.[0]?.name};});
-  // F1 standings stagione corrente - verifica anno
-  await test('f1_standings_season',async()=>{const d=await fetch('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings',10000);const c=d?.children?.[0];return{child_name:c?.name,season:d?.season,year:d?.year,first:c?.standings?.entries?.[0]?.athlete?.displayName,pts:c?.standings?.entries?.[0]?.stats?.find(s=>s.name==='points')?.value};});
+  // F1 ultima gara - prova path 2025 diretto
+  await test('f1_last_2025',async()=>{const r=await ergast('/2025/last/results');const race=r?.MRData?.RaceTable?.Races?.[0];return{raceName:race?.raceName,date:race?.date,results:race?.Results?.length,p1:race?.Results?.[0]?.Driver?.familyName};});
+  // F1 standings - anno e punti
+  await test('f1_standings_detail',async()=>{const d=await fetch('https://site.web.api.espn.com/apis/v2/sports/racing/f1/standings',10000);const c=d?.children?.[0];const e=c?.standings?.entries||[];return{season:c?.season?.year||d?.season?.year,count:e.length,p1:e[0]?.athlete?.displayName,pts:e[0]?.stats?.find(s=>s.name==='points')?.value};});
+  // Tennis - tutti i keys di rankings[0] per trovare dove sono i piloti
+  await test('tennis_r0_full',async()=>{const d=await fetch('https://site.api.espn.com/apis/site/v2/sports/tennis/atp/rankings?limit=3',10000);const r0=d?.rankings?.[0]||{};return{keys:Object.keys(r0),season:r0.season,type:r0.type,entries_keys:Object.keys(r0.entries?.[0]||{}),athletes_keys:Object.keys(r0.athletes?.[0]||{}),items_keys:Object.keys((r0.items||r0.ranking||r0.standings||[])[0]||{})};});
+  // MotoGP standings - prova motorsport-data
+  await test('moto_ergast_2025',async()=>{const d=await ergast('/2025/last/results');return{raceName:d?.MRData?.RaceTable?.Races?.[0]?.raceName};});
+  await test('moto_sdb_riders',async()=>{const d=await sdb('/searchplayers.php?p=bagnaia',3600000);return{count:(d?.player||[]).length,first:(d?.player||[])[0]?.strPlayer};});
   res.json(results);
 });
 
