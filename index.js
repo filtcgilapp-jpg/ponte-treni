@@ -2257,33 +2257,28 @@ app.get('/diag',async(req,res)=>{
     return{sdbId,eventsCount:(sr?.events||[]).length,firstEvent:sr?.events?.[0]?.strEvent};
   });
   // Test ESPN summary per Milan-Inter (id 737054)
-  await test('match_full_events',async()=>{
+  await test('match_deep',async()=>{
     const r=await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/summary?event=737054',{timeout:10000});
     const d=r.data;
-    const header=d.header?.competitions?.[0];
-    const allDetails=(header?.details||[]).map(ev=>({
-      clock:ev.clock?.displayValue,
-      type:ev.type?.text,
-      typeId:ev.type?.id,
-      player:ev.athletesInvolved?.[0]?.displayName,
-      team:ev.team?.displayName,
-      scoreValue:ev.scoreValue,
-      homeScore:ev.homeScore,
-      awayScore:ev.awayScore,
+    // Esplora tutte le chiavi top-level con sample
+    const overview={};
+    for(const k of Object.keys(d)){
+      const v=d[k];
+      if(Array.isArray(v)) overview[k]={type:'array',len:v.length,sample:JSON.stringify(v[0]).slice(0,120)};
+      else if(typeof v==='object') overview[k]={type:'object',keys:Object.keys(v||{})};
+      else overview[k]=v;
+    }
+    // scoringPlays specifico
+    const sp=(d.scoringPlays||[]).map(p=>({
+      clock:p.clock?.displayValue||p.period?.clock,
+      type:p.type?.text,
+      player:p.text,
+      team:p.team?.displayName,
+      homeScore:p.homeScore,awayScore:p.awayScore,
     }));
-    const bs=d.boxScore||{};
-    const allStats=(bs.teams||[]).map(t=>({
-      team:t.team?.displayName,
-      stats:(t.statistics||[]).map(s=>({name:s.name,val:s.displayValue})),
-    }));
-    return{
-      all_events:allDetails,
-      all_stats:allStats,
-      home:header?.competitors?.find(c=>c.homeAway==='home')?.team?.displayName,
-      away:header?.competitors?.find(c=>c.homeAway==='away')?.team?.displayName,
-      homeScore:header?.competitors?.find(c=>c.homeAway==='home')?.score,
-      awayScore:header?.competitors?.find(c=>c.homeAway==='away')?.score,
-    };
+    // Tenta anche keyEvents
+    const ke=(d.keyEvents||d.matchEvents||d.gameEvents||[]).slice(0,5);
+    return{overview,scoringPlays:sp,keyEvents_count:(d.keyEvents||[]).length};
   });
   res.json(results);
 });
