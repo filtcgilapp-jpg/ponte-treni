@@ -2256,6 +2256,35 @@ app.get('/diag',async(req,res)=>{
     const sr=await sdb(`/eventsseason.php?id=${sdbId}&s=${yr-1}-${yr}`,3600000).catch(()=>null);
     return{sdbId,eventsCount:(sr?.events||[]).length,firstEvent:sr?.events?.[0]?.strEvent};
   });
+  // Test ESPN summary per Milan-Inter (id 737054)
+  await test('match_summary_keys',async()=>{
+    const r=await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/summary?event=737054',{timeout:10000});
+    const d=r.data;
+    return{
+      keys:Object.keys(d),
+      plays_count:(d.plays||[]).length,
+      plays_sample:(d.plays||[]).slice(0,3).map(p=>({
+        clock:p.clock?.displayValue,
+        type:p.type?.text,
+        text:p.text?.slice(0,60),
+        period:p.period?.number,
+        coordinate:p.coordinate,
+        team:p.team?.displayName,
+      })),
+      boxscore_keys:Object.keys(d.boxScore||d.boxscore||{}),
+      header_status:d.header?.competitions?.[0]?.status?.type?.shortDetail,
+    };
+  });
+  await test('match_playbyplay',async()=>{
+    const r=await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/playbyplay?event=737054',{timeout:10000});
+    const d=r.data;
+    return{
+      keys:Object.keys(d),
+      plays_count:(d.plays||[]).length,
+      first_play:(d.plays||[])[0],
+      last_play:(d.plays||[]).slice(-1)[0],
+    };
+  });
   res.json(results);
 });
 
