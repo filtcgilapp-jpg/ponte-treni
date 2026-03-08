@@ -2279,4 +2279,56 @@ app.get('/diag',async(req,res)=>{
   res.json(results);
 });
 
+app.get('/diag/match',async(req,res)=>{
+  try{
+    const eventId=req.query.id||'737054';
+    const league=req.query.league||'ita.1';
+    const r=await axios.get(`https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/summary?event=${eventId}`,{timeout:10000});
+    const d=r.data;
+    const header=d.header?.competitions?.[0];
+    const competitors=header?.competitors||[];
+    const home=competitors.find(c=>c.homeAway==='home');
+    const away=competitors.find(c=>c.homeAway==='away');
+    const bs=d.boxScore||d.boxscore||{};
+    res.json({
+      // Info partita
+      match:{
+        home:home?.team?.displayName,
+        away:away?.team?.displayName,
+        homeScore:home?.score,
+        awayScore:away?.score,
+        status:header?.status?.type?.shortDetail,
+        clock:header?.status?.displayClock,
+      },
+      // Tutti gli eventi (details)
+      events:(header?.details||[]).map(ev=>({
+        clock:ev.clock?.displayValue,
+        type:ev.type?.text,
+        typeId:ev.type?.id,
+        player:ev.athletesInvolved?.map(a=>a.displayName),
+        team:ev.team?.displayName,
+        homeScore:ev.homeScore,
+        awayScore:ev.awayScore,
+        scoringPlay:ev.scoringPlay,
+      })),
+      // scoringPlays separati
+      scoringPlays:(d.scoringPlays||[]).map(p=>({
+        clock:p.clock?.displayValue,
+        type:p.type?.text,
+        text:p.text,
+        team:p.team?.displayName,
+        homeScore:p.homeScore,
+        awayScore:p.awayScore,
+      })),
+      // Statistiche squadre
+      teamStats:(bs.teams||[]).map(t=>({
+        team:t.team?.displayName,
+        stats:(t.statistics||[]).map(s=>({name:s.name,label:s.label,value:s.displayValue})),
+      })),
+      // Tutte le top keys per debug
+      topKeys:Object.keys(d),
+    });
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
 app.listen(PORT,()=>console.log(`Proxy porta ${PORT}`));
