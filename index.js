@@ -1850,51 +1850,88 @@ app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
     const id=req.params.id;
     const name=(req.query.name||'').trim();
     const yr=new Date().getFullYear();
-    const season=`${yr-1}-${yr}`;
+    const fdSeason=yr; // football-data usa anno singolo
     let W=0,D=0,L=0,GF=0,GA=0,played=0;
     const trophies=[];
     let sdbId=null;
 
-    // 1. Risolvi sdbId
-    if(id.startsWith('sdb:')){
-      sdbId=id.replace('sdb:','');
-    } else if(name){
-      try{
-        const s=await sdb(`/searchteams.php?t=${encodeURIComponent(name)}`,86400000);
+    // 1. Risolvi sdbId da SDB per nome
+    try{
+      const sname=id.startsWith('sdb:')?null:name;
+      if(id.startsWith('sdb:')) sdbId=id.replace('sdb:','');
+      else if(sname){
+        const s=await sdb(`/searchteams.php?t=${encodeURIComponent(sname)}`,86400000);
         sdbId=s?.teams?.[0]?.idTeam||null;
-      }catch{}
-    }
+      }
+    }catch{}
 
-    // 2. Trofei da SDB (se disponibile)
+    // 2. Trofei da SDB
     if(sdbId){
       try{
         const tr=await sdb(`/lookuptrophies.php?id=${sdbId}`,86400000);
         for(const t of(tr?.trophies||[])){
-          trophies.push({name:t.strTrophy||'',season:t.strSeason||'',league:t.strLeague||'',country:t.strCountry||''});
+          if(t.strTrophy) trophies.push({name:t.strTrophy,season:t.strSeason||'',league:t.strLeague||'',country:t.strCountry||''});
         }
       }catch{}
     }
 
-    // 3. Stats: calcola da eventi già caricati (usa /events che funziona già)
-    // Prende gli eventi passati dall'endpoint events che già funziona
-    try{
-      if(id.startsWith('sdb:') && sdbId){
-        const statsR=await sdb(`/eventsseason.php?id=${sdbId}&s=${season}`,3600000).catch(()=>({events:[]}));
-        for(const e of(statsR?.events||[])){
-          const hs=parseInt(e.intHomeScore),as=parseInt(e.intAwayScore);
-          if(isNaN(hs)||isNaN(as))continue;
+    // 3a. Stats da football-data.org (più affidabile, ha partite stagione corrente)
+    if(!id.startsWith('sdb:')){
+      try{
+        // Usa getFdId già esistente (usa cache + FD_NAME_MAP + fallback API)
+        const nameKey=(name||'').toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
+        let fdId=FD_NAME_MAP[nameKey];
+        if(!fdId){
+          for(const [k,v] of Object.entries(FD_NAME_MAP)){
+            if(nameKey&&(nameKey.includes(k)||k.includes(nameKey))){fdId=v;break;}
+          }
+        }
+        if(!fdId) fdId=await getFdTeamId(id,name).catch(()=>null);
+        if(fdId){
+          const r=await axios.get(
+            `https://api.football-data.org/v4/teams/${fdId}/matches?status=FINISHED&limit=60`,
+            {timeout:10000,headers:FD_H}
+          );
+          const matches=r.data?.matches||[];
+          const curSeason=matches.filter(m=>new Date(m.utcDate).getFullYear()>=yr-1);
+          for(const m of curSeason){
+            const isHome=m.homeTeam?.id===fdId;
+            const hs=m.score?.fullTime?.home,as_=m.score?.fullTime?.away;
+            if(hs===null||hs===undefined||as_===null||as_===undefined) continue;
+            const mygf=isHome?hs:as_,myga=isHome?as_:hs;
+            GF+=mygf;GA+=myga;
+            if(mygf>myga)W++;else if(mygf===myga)D++;else L++;
+          }
+          played=W+D+L;
+        }
+      }catch{}
+    }
+
+    // 3b. Fallback SDB eventsseason per squadre sdb: o se FD non ha trovato nulla
+    if(played===0 && sdbId){
+      try{
+        const season=`${yr-1}-${yr}`;
+        const sr=await sdb(`/eventsseason.php?id=${sdbId}&s=${season}`,3600000).catch(()=>({events:[]}));
+        for(const e of(sr?.events||[])){
+          const hs=parseInt(e.intHomeScore),as_=parseInt(e.intAwayScore);
+          if(isNaN(hs)||isNaN(as_))continue;
           const isHome=String(e.idHomeTeam)===String(sdbId);
-          const mygf=isHome?hs:as,myga=isHome?as:hs;
+          const mygf=isHome?hs:as_,myga=isHome?as_:hs;
           GF+=mygf;GA+=myga;
           if(mygf>myga)W++;else if(mygf===myga)D++;else L++;
         }
         played=W+D+L;
-      } else {
-        // ESPN: calcola da tutti gli slug lega
-        for(const lg of SOCCER_LEAGUES){
+      }catch{}
+    }
+
+    // 3c. Ultimo fallback: ESPN schedule (no cache)
+    if(played===0 && !id.startsWith('sdb:')){
+      try{
+        for(const lg of SOCCER_LEAGUES.filter(l=>!l.isCup)){
           try{
-            const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/schedule`,7200000);
-            for(const e of(d?.events||[])){
+            const r=await axios.get(`${ESPN}/soccer/${lg.slug}/teams/${id}/schedule`,
+              {timeout:8000,headers:{'Cache-Control':'no-cache'}});
+            for(const e of(r.data?.events||[])){
               const comp=e.competitions?.[0];
               if(!comp?.status?.type?.completed)continue;
               const comps=comp.competitors||[];
@@ -1909,10 +1946,10 @@ app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
           }catch{}
         }
         played=W+D+L;
-      }
-    }catch{}
+      }catch{}
+    }
 
-    res.json({stats:played>0?{played,W,D,L,GF,GA,season}:null,trophies});
+    res.json({stats:played>0?{played,W,D,L,GF,GA,season:`${yr-1}-${yr}`}:null,trophies});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1932,6 +1969,23 @@ app.get('/diag',async(req,res)=>{
   // MotoGP standings - prova motorsport-data
   await test('moto_ergast_2025',async()=>{const d=await ergast('/2025/last/results');return{raceName:d?.MRData?.RaceTable?.Races?.[0]?.raceName};});
   await test('moto_sdb_riders',async()=>{const d=await sdb('/searchplayers.php?p=bagnaia',3600000);return{count:(d?.player||[]).length,first:(d?.player||[])[0]?.strPlayer};});
+  // Stats calcio — test con Juventus ESPN id 109 e nome "Juventus"
+  await test('stats_juve_fdid',async()=>{const fdId=await getFdTeamId('109','Juventus');return{fdId};});
+  await test('stats_juve_fd_matches',async()=>{
+    const fdId=await getFdTeamId('109','Juventus');
+    if(!fdId) return{error:'no fdId'};
+    const r=await axios.get(`https://api.football-data.org/v4/teams/${fdId}/matches?status=FINISHED&limit=10`,{timeout:10000,headers:FD_H});
+    const m=r.data?.matches||[];
+    return{count:m.length,first:m[0]?.homeTeam?.name+' vs '+m[0]?.awayTeam?.name,date:m[0]?.utcDate};
+  });
+  await test('stats_juve_sdb',async()=>{
+    const s=await sdb('/searchteams.php?t=Juventus',86400000);
+    const sdbId=s?.teams?.[0]?.idTeam;
+    if(!sdbId) return{error:'no sdbId'};
+    const yr=new Date().getFullYear();
+    const sr=await sdb(`/eventsseason.php?id=${sdbId}&s=${yr-1}-${yr}`,3600000).catch(()=>null);
+    return{sdbId,eventsCount:(sr?.events||[]).length,firstEvent:sr?.events?.[0]?.strEvent};
+  });
   res.json(results);
 });
 
