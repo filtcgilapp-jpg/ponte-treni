@@ -2279,6 +2279,115 @@ app.get('/diag',async(req,res)=>{
   res.json(results);
 });
 
+// ─── Match Detail: campo 2D, statistiche, eventi ─────────────────────────────
+app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
+  try{
+    res.set('Cache-Control','no-store');
+    const {league,id}=req.params;
+    const r=await axios.get(
+      `https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/summary?event=${id}`,
+      {timeout:10000,headers:{'Cache-Control':'no-cache'}}
+    );
+    const d=r.data;
+    const header=d.header?.competitions?.[0];
+    const competitors=header?.competitors||[];
+    const home=competitors.find(c=>c.homeAway==='home');
+    const away=competitors.find(c=>c.homeAway==='away');
+    const bs=d.boxScore||d.boxscore||{};
+
+    // ── Statistiche squadre ──────────────────────────────────────────────────
+    const STAT_KEYS=['possessionPct','totalShots','shotsOnTarget','wonCorners',
+      'foulsCommitted','yellowCards','redCards','offsides','saves',
+      'totalPasses','passPct','effectiveTackles','interceptions','effectiveClearance'];
+    const teamStats=(bs.teams||[]).map(t=>({
+      team:t.team?.displayName,
+      teamId:String(t.team?.id||''),
+      color:t.team?.color||'',
+      stats:Object.fromEntries(
+        (t.statistics||[])
+          .filter(s=>STAT_KEYS.includes(s.name))
+          .map(s=>[s.name,{label:s.label,value:s.displayValue,raw:s.value}])
+      ),
+    }));
+
+    // ── Eventi: details + keyEvents + commentary ────────────────────────────
+    const typeMap={
+      'Goal':'goal','Yellow Card':'yellow','Red Card':'red',
+      'Yellow-Red Card':'red2','Substitution':'sub','Offside':'offside',
+      'Corner':'corner','Foul':'foul','Penalty':'penalty','VAR':'var',
+      'Shot':'shot','Shot on Target':'shot_on','Save':'save',
+      'Missed Penalty':'pen_miss','Own Goal':'own_goal',
+    };
+    const normType=t=>{
+      if(!t) return 'other';
+      for(const[k,v] of Object.entries(typeMap)) if(t.includes(k)) return v;
+      return 'other';
+    };
+    // da details (header)
+    const detailEvents=(header?.details||[]).map(ev=>({
+      clock:ev.clock?.displayValue||'',
+      type:normType(ev.type?.text),
+      typeRaw:ev.type?.text||'',
+      players:(ev.athletesInvolved||[]).map(a=>a.displayName),
+      team:ev.team?.displayName||'',
+      teamId:String(ev.team?.id||''),
+      homeScore:ev.homeScore,
+      awayScore:ev.awayScore,
+      scoringPlay:!!ev.scoringPlay,
+    }));
+    // da keyEvents
+    const keyEvents=(d.keyEvents||[]).map(ev=>({
+      clock:ev.clock?.displayValue||ev.time?.displayValue||'',
+      type:normType(ev.type?.text||ev.shortName),
+      typeRaw:ev.type?.text||ev.shortName||'',
+      players:(ev.athletes||ev.athletesInvolved||[]).map(a=>a.displayName||a.name||''),
+      team:ev.team?.displayName||'',
+      teamId:String(ev.team?.id||''),
+      homeScore:ev.homeScore,
+      awayScore:ev.awayScore,
+      scoringPlay:!!ev.scoringPlay,
+      text:ev.text||ev.description||'',
+    }));
+    // da commentary (più dettagliato)
+    const commentary=(d.commentary||[]).slice(0,60).map(c=>({
+      clock:c.time?.displayValue||'',
+      type:normType(c.type?.text||c.shortName),
+      typeRaw:c.type?.text||c.shortName||'',
+      text:c.text||'',
+      team:c.team?.displayName||'',
+    }));
+
+    // Merge eventi (priority: keyEvents > details)
+    let events=keyEvents.length>0?keyEvents:detailEvents;
+    // Ordina per minuto
+    const parseClock=s=>{const m=parseInt((s||'0').replace(/\D.*$/,''));return isNaN(m)?0:m;};
+    events=events.sort((a,b)=>parseClock(a.clock)-parseClock(b.clock));
+
+    res.json({
+      match:{
+        id:String(id),
+        league,
+        home:home?.team?.displayName||'',
+        homeId:String(home?.team?.id||''),
+        homeColor:'#'+(home?.team?.color||'cccccc'),
+        homeScore:home?.score||'0',
+        away:away?.team?.displayName||'',
+        awayId:String(away?.team?.id||''),
+        awayColor:'#'+(away?.team?.color||'cccccc'),
+        awayScore:away?.score||'0',
+        status:header?.status?.type?.shortDetail||'',
+        clock:header?.status?.displayClock||'',
+        state:header?.status?.type?.state||'pre',
+        period:header?.status?.period||1,
+      },
+      teamStats,
+      events,
+      commentary,
+      hasKeyEvents:keyEvents.length>0,
+    });
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
 app.get('/diag/match',async(req,res)=>{
   try{
     const eventId=req.query.id||'737054';
