@@ -1845,6 +1845,247 @@ app.get('/sport/soccer/worldcup2026',async(req,res)=>{
 
 // ── DIAGNOSTICA ─────────────────────────────────────────────────────────────
 // ── Statistiche stagione squadra ─────────────────────────────────────────────
+
+// ─── Albo d'oro squadre italiane (fonte: Wikipedia, aggiornato 2025) ──────────
+const IT_TROPHIES = {
+  // Juventus
+  'juventus': {
+    name:'Juventus', total:71,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:36},
+      {name:'Coppa Italia',       icon:'🏆', count:15},
+      {name:'Supercoppa Italiana',icon:'🏆', count:9},
+    ],
+    international:[
+      {name:'Champions League / Coppa dei Campioni', icon:'⭐', count:2},
+      {name:'Coppa delle Coppe UEFA',                icon:'⭐', count:1},
+      {name:'Coppa UEFA',                            icon:'⭐', count:3},
+      {name:'Supercoppa UEFA',                       icon:'⭐', count:2},
+      {name:'Coppa Intercontinentale',               icon:'⭐', count:2},
+      {name:'Coppa Intertoto UEFA',                  icon:'⭐', count:1},
+    ],
+  },
+  // Inter
+  'inter': {
+    name:'Inter', total:48,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:20},
+      {name:'Coppa Italia',       icon:'🏆', count:9},
+      {name:'Supercoppa Italiana',icon:'🏆', count:7},
+    ],
+    international:[
+      {name:'Champions League / Coppa dei Campioni', icon:'⭐', count:3},
+      {name:'Coppa UEFA',                            icon:'⭐', count:3},
+      {name:'Supercoppa UEFA',                       icon:'⭐', count:2},
+      {name:'Coppa Intercontinentale',               icon:'⭐', count:2},
+      {name:'Coppa delle Coppe UEFA',                icon:'⭐', count:2},
+    ],
+  },
+  // Milan
+  'milan': {
+    name:'Milan', total:49,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:19},
+      {name:'Coppa Italia',       icon:'🏆', count:5},
+      {name:'Supercoppa Italiana',icon:'🏆', count:7},
+    ],
+    international:[
+      {name:'Champions League / Coppa dei Campioni', icon:'⭐', count:7},
+      {name:'Coppa delle Coppe UEFA',                icon:'⭐', count:2},
+      {name:'Supercoppa UEFA',                       icon:'⭐', count:5},
+      {name:'Coppa Intercontinentale',               icon:'⭐', count:2},
+      {name:'Coppa del Mondo per Club FIFA',         icon:'⭐', count:1},
+      {name:'Coppa Intertoto UEFA',                  icon:'⭐', count:1},
+    ],
+  },
+  // Roma
+  'roma': {
+    name:'Roma', total:14,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:3},
+      {name:'Coppa Italia',       icon:'🏆', count:9},
+      {name:'Supercoppa Italiana',icon:'🏆', count:2},
+    ],
+    international:[
+      {name:'Conference League UEFA', icon:'⭐', count:1},
+      {name:'Coppa Anglo-Italiana',   icon:'⭐', count:1},
+    ],
+  },
+  // Napoli
+  'napoli': {
+    name:'Napoli', total:12,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:3},
+      {name:'Coppa Italia',       icon:'🏆', count:6},
+      {name:'Supercoppa Italiana',icon:'🏆', count:2},
+    ],
+    international:[
+      {name:'Coppa UEFA',         icon:'⭐', count:1},
+    ],
+  },
+  // Lazio
+  'lazio': {
+    name:'Lazio', total:18,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:2},
+      {name:'Coppa Italia',       icon:'🏆', count:7},
+      {name:'Supercoppa Italiana',icon:'🏆', count:5},
+    ],
+    international:[
+      {name:'Coppa delle Coppe UEFA', icon:'⭐', count:1},
+      {name:'Supercoppa UEFA',        icon:'⭐', count:1},
+      {name:'Coppa Anglo-Italiana',   icon:'⭐', count:1},
+      {name:'Coppa delle Alpi',       icon:'⭐', count:1},
+    ],
+  },
+  // Fiorentina
+  'fiorentina': {
+    name:'Fiorentina', total:13,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:2},
+      {name:'Coppa Italia',       icon:'🏆', count:6},
+      {name:'Supercoppa Italiana',icon:'🏆', count:1},
+    ],
+    international:[
+      {name:'Coppa delle Coppe UEFA', icon:'⭐', count:1},
+      {name:'Coppa Mitropa',          icon:'⭐', count:2},
+      {name:'Coppa Anglo-Italiana',   icon:'⭐', count:1},
+    ],
+  },
+  // Atalanta
+  'atalanta': {
+    name:'Atalanta', total:4,
+    national:[
+      {name:'Coppa Italia',       icon:'🏆', count:1},
+    ],
+    international:[
+      {name:'Europa League UEFA', icon:'⭐', count:1},
+    ],
+    national2:[
+      {name:'Serie C (Campionato)', icon:'🏆', count:2},
+    ],
+  },
+  // Torino
+  'torino': {
+    name:'Torino', total:14,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:7},
+      {name:'Coppa Italia',       icon:'🏆', count:5},
+      {name:'Supercoppa Italiana',icon:'🏆', count:1},
+    ],
+    international:[
+      {name:'Coppa Anglo-Italiana',icon:'⭐', count:1},
+    ],
+  },
+  // Sampdoria
+  'sampdoria': {
+    name:'Sampdoria', total:8,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:1},
+      {name:'Coppa Italia',       icon:'🏆', count:4},
+      {name:'Supercoppa Italiana',icon:'🏆', count:1},
+    ],
+    international:[
+      {name:'Coppa delle Coppe UEFA', icon:'⭐', count:1},
+      {name:'Coppa Anglo-Italiana',   icon:'⭐', count:1},
+    ],
+  },
+  // Bologna
+  'bologna': {
+    name:'Bologna', total:10,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:7},
+      {name:'Coppa Italia',       icon:'🏆', count:2},
+    ],
+    international:[
+      {name:'Coppa Mitropa',      icon:'⭐', count:1},
+    ],
+  },
+  // Genoa
+  'genoa': {
+    name:'Genoa', total:13,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:9},
+      {name:'Coppa Italia',       icon:'🏆', count:1},
+    ],
+    international:[
+      {name:'Coppa Mitropa',      icon:'⭐', count:3},
+    ],
+  },
+  // Parma
+  'parma': {
+    name:'Parma', total:11,
+    national:[
+      {name:'Serie A',            icon:'🏆', count:0},
+      {name:'Coppa Italia',       icon:'🏆', count:3},
+      {name:'Supercoppa Italiana',icon:'🏆', count:2},
+    ],
+    international:[
+      {name:'Coppa delle Coppe UEFA', icon:'⭐', count:1},
+      {name:'Coppa UEFA',             icon:'⭐', count:2},
+      {name:'Supercoppa UEFA',        icon:'⭐', count:1},
+      {name:'Coppa Anglo-Italiana',   icon:'⭐', count:2},
+    ],
+  },
+  // Cagliari
+  'cagliari': {
+    name:'Cagliari', total:1,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:1},
+    ],
+    international:[],
+  },
+  // Verona
+  'verona': {
+    name:'Verona', total:1,
+    national:[
+      {name:'Serie A (Scudetto)', icon:'🏆', count:1},
+    ],
+    international:[],
+  },
+  // Brescia
+  'brescia': {
+    name:'Brescia', total:1,
+    national:[
+      {name:'Coppa Italia',       icon:'🏆', count:1},
+    ],
+    international:[],
+  },
+  // Udinese
+  'udinese': {
+    name:'Udinese', total:1,
+    national:[
+      {name:'Coppa Intertoto UEFA', icon:'🏆', count:1},
+    ],
+    international:[],
+  },
+  // Venezia
+  'venezia': {
+    name:'Venezia', total:3,
+    national:[
+      {name:'Coppa Italia',       icon:'🏆', count:1},
+    ],
+    international:[
+      {name:'Coppa Mitropa',      icon:'⭐', count:2},
+    ],
+  },
+};
+
+// Trova entry nell'albo d'oro italiano per nome squadra
+function getItTrophies(name){
+  if(!name) return null;
+  const n=name.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
+  // Match esatto
+  for(const [k,v] of Object.entries(IT_TROPHIES)){
+    if(n===k||n.includes(k)||k.includes(n.split(' ')[0])) return v;
+  }
+  // Match parziale per parole chiave
+  const words=n.split(' ').filter(w=>w.length>2);
+  for(const [k,v] of Object.entries(IT_TROPHIES)){
+    if(words.some(w=>k.includes(w))) return v;
+  }
+  return null;
+}
 app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
   try{
     const id=req.params.id;
@@ -1865,8 +2106,13 @@ app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
       }
     }catch{}
 
-    // 2. Trofei da SDB
-    if(sdbId){
+    // 2. Trofei: prima cerca nell'albo d'oro italiano hardcoded
+    const itEntry=getItTrophies(name);
+    if(itEntry){
+      // Usa dati Wikipedia hardcoded
+      trophies.push({_itEntry:true, data:itEntry});
+    } else if(sdbId){
+      // Fallback SDB per squadre non italiane
       try{
         const tr=await sdb(`/lookuptrophies.php?id=${sdbId}`,86400000);
         for(const t of(tr?.trophies||[])){
