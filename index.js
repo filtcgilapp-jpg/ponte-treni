@@ -2260,25 +2260,21 @@ app.get('/diag',async(req,res)=>{
   await test('match_deep',async()=>{
     const r=await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/summary?event=737054',{timeout:10000});
     const d=r.data;
-    // Esplora tutte le chiavi top-level con sample
     const overview={};
     for(const k of Object.keys(d)){
-      const v=d[k];
-      if(Array.isArray(v)) overview[k]={type:'array',len:v.length,sample:JSON.stringify(v[0]).slice(0,120)};
-      else if(typeof v==='object') overview[k]={type:'object',keys:Object.keys(v||{})};
-      else overview[k]=v;
+      try{
+        const v=d[k];
+        if(Array.isArray(v)) overview[k]={type:'array',len:v.length,sample:(JSON.stringify(v[0]||null)||'').slice(0,100)};
+        else if(v&&typeof v==='object') overview[k]={type:'object',keys:Object.keys(v)};
+        else overview[k]=v;
+      }catch{overview[k]='error';}
     }
-    // scoringPlays specifico
-    const sp=(d.scoringPlays||[]).map(p=>({
-      clock:p.clock?.displayValue||p.period?.clock,
-      type:p.type?.text,
-      player:p.text,
-      team:p.team?.displayName,
-      homeScore:p.homeScore,awayScore:p.awayScore,
-    }));
-    // Tenta anche keyEvents
-    const ke=(d.keyEvents||d.matchEvents||d.gameEvents||[]).slice(0,5);
-    return{overview,scoringPlays:sp,keyEvents_count:(d.keyEvents||[]).length};
+    // scoringPlays
+    const sp=(d.scoringPlays||[]).slice(0,5).map(p=>{
+      try{return{clock:p.clock?.displayValue,type:p.type?.text,text:(p.text||'').slice(0,80),team:p.team?.displayName,hs:p.homeScore,as:p.awayScore};}
+      catch{return{};}
+    });
+    return{top_keys:Object.keys(d),overview,sp_count:(d.scoringPlays||[]).length,sp_sample:sp};
   });
   res.json(results);
 });
