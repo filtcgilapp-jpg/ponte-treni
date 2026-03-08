@@ -890,7 +890,9 @@ app.get('/sport/f1/drivers',async(req,res)=>{
           Driver:{givenName:e.athlete?.firstName||'',familyName:e.athlete?.lastName||'',nationality:e.athlete?.flag?.alt||''},
           Constructors:[{name:e.team?.displayName||''}],
         }));
-        return res.json({MRData:{StandingsTable:{StandingsLists:[{season:String(F1Y),DriverStandings:list}]}}});
+        // Salta ESPN se tutti i punti sono 0 (dati non aggiornati)
+        const totalPts=list.reduce((s,e)=>s+parseFloat(e.points||0),0);
+        if(totalPts>0) return res.json({MRData:{StandingsTable:{StandingsLists:[{season:String(F1Y),DriverStandings:list}]}}});
       }
     }catch{}
     // Jolpica fallback
@@ -1886,9 +1888,36 @@ app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
       }catch{}
     }
 
-    // Fallback ESPN schedule per stats se SDB vuoto
+    // Fallback ESPN: usa team/statistics API diretta
     if(played===0 && !id.startsWith('sdb:')){
       try{
+        // Prova ESPN team statistics endpoint
+        for(const lg of SOCCER_LEAGUES){
+          try{
+            const yr=new Date().getFullYear();
+            const d=await axios.get(
+              `${ESPN}/soccer/${lg.slug}/teams/${id}/statistics`,
+              {timeout:8000,headers:{'Cache-Control':'no-cache'}}
+            );
+            const splits=d.data?.splits?.categories||[];
+            const general=splits.find(c=>c.name==='general')||splits[0];
+            const stats=general?.stats||[];
+            const getStat=n=>parseInt(stats.find(s=>s.name===n)?.value||0);
+            const gp=getStat('gamesPlayed')||getStat('GP');
+            const gw=getStat('wins')||getStat('W');
+            const gl=getStat('losses')||getStat('L');
+            const gd=getStat('ties')||getStat('D')||getStat('draws');
+            const gf=getStat('pointsFor')||getStat('goalsFor');
+            const ga=getStat('pointsAgainst')||getStat('goalsAgainst');
+            if(gp>0){W=gw;D=gd;L=gl;GF=gf;GA=ga;played=gp;break;}
+          }catch{}
+        }
+      }catch{}
+    }
+    // Ultimo fallback: calcola da schedule ESPN
+    if(played===0 && !id.startsWith('sdb:')){
+      try{
+        const allLeagueEvents=[];
         await Promise.all(SOCCER_LEAGUES.map(async(lg)=>{
           try{
             const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/schedule`,3600000);
