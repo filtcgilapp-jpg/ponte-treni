@@ -898,7 +898,19 @@ app.get('/sport/f1/drivers',async(req,res)=>{
       const d=await ergast(`/${y}/driverStandings`,3600000).catch(()=>null);
       if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.length>0) return res.json(d);
     }
-    res.status(500).json({error:'Dati non disponibili'});
+    // Hardcoded dopo Australian GP 2026
+    return res.json({MRData:{StandingsTable:{StandingsLists:[{season:'2026',DriverStandings:[
+      {position:'1', points:'26',wins:'1',Driver:{givenName:'George',  familyName:'Russell',  nationality:'British'},    Constructors:[{name:'Mercedes'}]},
+      {position:'2', points:'18',wins:'0',Driver:{givenName:'Kimi',    familyName:'Antonelli',nationality:'Italian'},    Constructors:[{name:'Mercedes'}]},
+      {position:'3', points:'15',wins:'0',Driver:{givenName:'Charles', familyName:'Leclerc',  nationality:'Monegasque'}, Constructors:[{name:'Ferrari'}]},
+      {position:'4', points:'12',wins:'0',Driver:{givenName:'Lewis',   familyName:'Hamilton', nationality:'British'},    Constructors:[{name:'Ferrari'}]},
+      {position:'5', points:'10',wins:'0',Driver:{givenName:'Lando',   familyName:'Norris',   nationality:'British'},    Constructors:[{name:'McLaren'}]},
+      {position:'6', points:'8', wins:'0',Driver:{givenName:'Max',     familyName:'Verstappen',nationality:'Dutch'},     Constructors:[{name:'Red Bull'}]},
+      {position:'7', points:'6', wins:'0',Driver:{givenName:'Ollie',   familyName:'Bearman',  nationality:'British'},    Constructors:[{name:'Haas'}]},
+      {position:'8', points:'4', wins:'0',Driver:{givenName:'Arvid',   familyName:'Lindblad', nationality:'Swedish'},    Constructors:[{name:'Racing Bulls'}]},
+      {position:'9', points:'2', wins:'0',Driver:{givenName:'Gabriel', familyName:'Bortoleto',nationality:'Brazilian'},  Constructors:[{name:'Audi'}]},
+      {position:'10',points:'1', wins:'0',Driver:{givenName:'Pierre',  familyName:'Gasly',    nationality:'French'},     Constructors:[{name:'Alpine'}]},
+    ]}]}}});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -925,7 +937,21 @@ app.get('/sport/f1/constructors',async(req,res)=>{
       const d=await ergast(`/${y}/constructorStandings`,3600000).catch(()=>null);
       if(d?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings?.length>0) return res.json(d);
     }
-    res.status(500).json({error:'Dati non disponibili'});
+    // Hardcoded dopo Australian GP 2026
+    return res.json({MRData:{StandingsTable:{StandingsLists:[{ConstructorStandings:[
+      {position:'1',points:'44',wins:'1',Constructor:{name:'Mercedes',  nationality:'British'}},
+      {position:'2',points:'27',wins:'0',Constructor:{name:'Ferrari',   nationality:'Italian'}},
+      {position:'3',points:'10',wins:'0',Constructor:{name:'McLaren',   nationality:'British'}},
+      {position:'4',points:'8', wins:'0',Constructor:{name:'Red Bull',  nationality:'Austrian'}},
+      {position:'5',points:'6', wins:'0',Constructor:{name:'Haas',      nationality:'American'}},
+      {position:'6',points:'4', wins:'0',Constructor:{name:'Racing Bulls',nationality:'Italian'}},
+      {position:'7',points:'2', wins:'0',Constructor:{name:'Audi',      nationality:'German'}},
+      {position:'8',points:'1', wins:'0',Constructor:{name:'Alpine',    nationality:'French'}},
+      {position:'9',points:'0', wins:'0',Constructor:{name:'Williams',  nationality:'British'}},
+      {position:'10',points:'0',wins:'0',Constructor:{name:'Red Bull',  nationality:'Austrian'}},
+      {position:'11',points:'0',wins:'0',Constructor:{name:'Aston Martin',nationality:'British'}},
+      {position:'12',points:'0',wins:'0',Constructor:{name:'Cadillac',  nationality:'American'}},
+    ]}]}}});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -942,8 +968,37 @@ app.get('/sport/f1/last',async(req,res)=>{
       if(raceYear<F1Y) continue;
       return res.json(d);
     }
-    // Nessuna gara della stagione corrente ancora disputata
-    res.json({MRData:{RaceTable:{Races:[]}}});
+    // Fallback hardcoded: Australian GP 2026 (prima gara stagione)
+    res.json({MRData:{RaceTable:{Races:[{
+      round:'1',
+      raceName:'Australian Grand Prix',
+      date:'2026-03-08',
+      Circuit:{circuitName:'Albert Park Circuit',circuitId:'albert_park',Location:{country:'Australia',locality:'Melbourne'}},
+      Results:[
+        {position:'1', Driver:{givenName:'George',    familyName:'Russell',    nationality:'British'},    Constructor:{name:'Mercedes'},     points:'26', Time:{time:'1:27:43.587'}, status:'Finished'},
+        {position:'2', Driver:{givenName:'Kimi',      familyName:'Antonelli',  nationality:'Italian'},    Constructor:{name:'Mercedes'},     points:'18', Time:{time:'+2.974s'},    status:'Finished'},
+        {position:'3', Driver:{givenName:'Charles',   familyName:'Leclerc',    nationality:'Monegasque'}, Constructor:{name:'Ferrari'},      points:'15', Time:{time:'+15.519s'},   status:'Finished'},
+        {position:'4', Driver:{givenName:'Lewis',     familyName:'Hamilton',   nationality:'British'},    Constructor:{name:'Ferrari'},      points:'12', Time:{time:'+16.144s'},   status:'Finished'},
+        {position:'5', Driver:{givenName:'Lando',     familyName:'Norris',     nationality:'British'},    Constructor:{name:'McLaren'},      points:'10', Time:{time:'+51.741s'},   status:'Finished'},
+        {position:'6', Driver:{givenName:'Max',       familyName:'Verstappen', nationality:'Dutch'},      Constructor:{name:'Red Bull'},     points:'8',  Time:{time:'+54.617s'},   status:'Finished'},
+        {position:'7', Driver:{givenName:'Ollie',     familyName:'Bearman',    nationality:'British'},    Constructor:{name:'Haas'},         points:'6',  status:'+1 lap'},
+        {position:'8', Driver:{givenName:'Arvid',     familyName:'Lindblad',   nationality:'Swedish'},    Constructor:{name:'Racing Bulls'}, points:'4',  status:'+1 lap'},
+        {position:'9', Driver:{givenName:'Gabriel',   familyName:'Bortoleto',  nationality:'Brazilian'},  Constructor:{name:'Audi'},         points:'2',  status:'+1 lap'},
+        {position:'10',Driver:{givenName:'Pierre',    familyName:'Gasly',      nationality:'French'},     Constructor:{name:'Alpine'},       points:'1',  status:'+1 lap'},
+        {position:'11',Driver:{givenName:'Esteban',   familyName:'Ocon',       nationality:'French'},     Constructor:{name:'Haas'},         points:'0',  status:'+1 lap'},
+        {position:'12',Driver:{givenName:'Alex',      familyName:'Albon',      nationality:'Thai'},       Constructor:{name:'Williams'},     points:'0',  status:'+1 lap'},
+        {position:'13',Driver:{givenName:'Liam',      familyName:'Lawson',     nationality:'New Zealander'},Constructor:{name:'Racing Bulls'},points:'0', status:'+1 lap'},
+        {position:'14',Driver:{givenName:'Franco',    familyName:'Colapinto',  nationality:'Argentine'},  Constructor:{name:'Alpine'},       points:'0',  status:'+2 laps'},
+        {position:'15',Driver:{givenName:'Carlos',    familyName:'Sainz',      nationality:'Spanish'},    Constructor:{name:'Williams'},     points:'0',  status:'+2 laps'},
+        {position:'16',Driver:{givenName:'Sergio',    familyName:'Perez',      nationality:'Mexican'},    Constructor:{name:'Cadillac'},     points:'0',  status:'+3 laps'},
+        {position:'17',Driver:{givenName:'Lance',     familyName:'Stroll',     nationality:'Canadian'},   Constructor:{name:'Aston Martin'}, points:'0',  status:'DNF'},
+        {position:'18',Driver:{givenName:'Fernando',  familyName:'Alonso',     nationality:'Spanish'},    Constructor:{name:'Aston Martin'}, points:'0',  status:'DNF'},
+        {position:'19',Driver:{givenName:'Valtteri',  familyName:'Bottas',     nationality:'Finnish'},    Constructor:{name:'Cadillac'},     points:'0',  status:'DNF'},
+        {position:'20',Driver:{givenName:'Isack',     familyName:'Hadjar',     nationality:'French'},     Constructor:{name:'Red Bull'},     points:'0',  status:'DNF'},
+        {position:'21',Driver:{givenName:'Oscar',     familyName:'Piastri',    nationality:'Australian'}, Constructor:{name:'McLaren'},     points:'0',  status:'DNS'},
+        {position:'22',Driver:{givenName:'Nico',      familyName:'Hulkenberg', nationality:'German'},     Constructor:{name:'Audi'},         points:'0',  status:'DNS'},
+      ],
+    }]}}});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -970,6 +1025,28 @@ app.get('/sport/f1/past',async(req,res)=>{
         return{...r,results};
       }catch{return{...r,results:[]};}
     }));
+    // Se Jolpica non ha ancora i dati della stagione 2026, fallback hardcoded
+    if(withResults.length===0){
+      return res.json({races:[
+        {
+          round:'1', raceName:'Australian Grand Prix',
+          date:'2026-03-08',
+          Circuit:{circuitName:'Albert Park Circuit',Location:{country:'Australia',locality:'Melbourne'}},
+          results:[
+            {position:'1',driver:'Russell',     constructor:'Mercedes',  points:'26'},
+            {position:'2',driver:'Antonelli',   constructor:'Mercedes',  points:'18'},
+            {position:'3',driver:'Leclerc',     constructor:'Ferrari',   points:'15'},
+            {position:'4',driver:'Hamilton',    constructor:'Ferrari',   points:'12'},
+            {position:'5',driver:'Norris',      constructor:'McLaren',   points:'10'},
+            {position:'6',driver:'Verstappen',  constructor:'Red Bull',  points:'8'},
+            {position:'7',driver:'Bearman',     constructor:'Haas',      points:'6'},
+            {position:'8',driver:'Lindblad',    constructor:'Racing Bulls','points':'4'},
+            {position:'9',driver:'Bortoleto',   constructor:'Audi',      points:'2'},
+            {position:'10',driver:'Gasly',      constructor:'Alpine',    points:'1'},
+          ],
+        },
+      ]});
+    }
     res.json({races:withResults});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -1163,16 +1240,23 @@ app.get('/sport/motogp/table',async(req,res)=>{
     }catch{}
     // Classifica 2026 dopo Thai GP (Round 1) — aggiornare dopo ogni gara
     return res.json({table:[
-      {intRank:'1', strTeam:'Pedro Acosta',         intPoints:'45',intPlayed:'1'},
-      {intRank:'2', strTeam:'Marco Bezzecchi',       intPoints:'37',intPlayed:'1'},
-      {intRank:'3', strTeam:'Raul Fernandez',         intPoints:'28',intPlayed:'1'},
-      {intRank:'4', strTeam:'Jorge Martín',           intPoints:'24',intPlayed:'1'},
-      {intRank:'5', strTeam:'Marc Márquez',           intPoints:'20',intPlayed:'1'},
-      {intRank:'6', strTeam:'Ai Ogura',               intPoints:'18',intPlayed:'1'},
-      {intRank:'7', strTeam:'Brad Binder',            intPoints:'17',intPlayed:'1'},
-      {intRank:'8', strTeam:'Fabio Di Giannantonio',  intPoints:'11',intPlayed:'1'},
-      {intRank:'9', strTeam:'Luca Marini',            intPoints:'8', intPlayed:'1'},
-      {intRank:'10',strTeam:'Enea Bastianini',        intPoints:'7', intPlayed:'1'},
+      {intRank:'1', strTeam:'Pedro Acosta',           strNation:'KTM Factory',        intPoints:'32',intPlayed:'1'},
+      {intRank:'2', strTeam:'Marco Bezzecchi',         strNation:'Aprilia Racing',     intPoints:'27',intPlayed:'1'},
+      {intRank:'3', strTeam:'Raúl Fernández',          strNation:'Trackhouse Aprilia', intPoints:'23',intPlayed:'1'},
+      {intRank:'4', strTeam:'Jorge Martín',            strNation:'Aprilia Racing',     intPoints:'18',intPlayed:'1'},
+      {intRank:'5', strTeam:'Ai Ogura',                strNation:'Trackhouse Aprilia', intPoints:'17',intPlayed:'1'},
+      {intRank:'6', strTeam:'Brad Binder',             strNation:'Red Bull KTM',       intPoints:'13',intPlayed:'1'},
+      {intRank:'7', strTeam:'Fabio Di Giannantonio',   strNation:'Pertamina VR46',     intPoints:'12',intPlayed:'1'},
+      {intRank:'8', strTeam:'Marc Márquez',            strNation:'Ducati Lenovo',      intPoints:'9', intPlayed:'1'},
+      {intRank:'9', strTeam:'Franco Morbidelli',       strNation:'Pertamina VR46',     intPoints:'8', intPlayed:'1'},
+      {intRank:'10',strTeam:'Francesco Bagnaia',       strNation:'Ducati Lenovo',      intPoints:'8', intPlayed:'1'},
+      {intRank:'11',strTeam:'Luca Marini',             strNation:'Honda HRC',          intPoints:'6', intPlayed:'1'},
+      {intRank:'12',strTeam:'Johann Zarco',            strNation:'LCR Honda',          intPoints:'5', intPlayed:'1'},
+      {intRank:'13',strTeam:'Enea Bastianini',         strNation:'Tech3 KTM',          intPoints:'4', intPlayed:'1'},
+      {intRank:'14',strTeam:'Diogo Moreira',           strNation:'LCR Honda',          intPoints:'3', intPlayed:'1'},
+      {intRank:'15',strTeam:'Joan Mir',                strNation:'Honda HRC',          intPoints:'3', intPlayed:'1'},
+      {intRank:'16',strTeam:'Fabio Quartararo',        strNation:'Monster Yamaha',     intPoints:'2', intPlayed:'1'},
+      {intRank:'17',strTeam:'Alex Rins',               strNation:'Monster Yamaha',     intPoints:'1', intPlayed:'1'},
     ],season:'2026',note:'dopo Thai GP R1'});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -1740,6 +1824,57 @@ app.get('/sport/soccer/worldcup2026',async(req,res)=>{
 });
 
 // ── DIAGNOSTICA ─────────────────────────────────────────────────────────────
+// ── Statistiche stagione squadra ─────────────────────────────────────────────
+app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
+  try{
+    const id=req.params.id;
+    const name=(req.query.name||'').trim();
+    // TheSportsDB: cerca team per nome e prende season stats
+    let sdbId=null;
+    if(id.startsWith('sdb:')){sdbId=id.replace('sdb:','');}
+    else{
+      // cerca per nome
+      try{
+        const s=await sdb(`/searchteams.php?t=${encodeURIComponent(name)}`,86400000);
+        sdbId=s?.teams?.[0]?.idTeam;
+      }catch{}
+    }
+    if(!sdbId) return res.json({stats:null,scorers:[],trophies:[]});
+    const yr=new Date().getFullYear();
+    const season=`${yr-1}-${yr}`;
+    const[statsR,scorersR,trophiesR]=await Promise.all([
+      // non esiste endpoint stats diretto su free — calcoliamo da eventi
+      sdb(`/eventsseason.php?id=${sdbId}&s=${season}`,3600000).catch(()=>({events:[]})),
+      sdb(`/eventsnext.php?id=${sdbId}`,3600000).catch(()=>({events:[]})),  // placeholder
+      sdb(`/lookuptrophies.php?id=${sdbId}`,86400000).catch(()=>({trophies:[]})),
+    ]);
+    // Calcola stats da eventi stagione
+    const events=(statsR?.events||[]);
+    let W=0,D=0,L=0,GF=0,GA=0;
+    for(const e of events){
+      const hs=parseInt(e.intHomeScore),as=parseInt(e.intAwayScore);
+      if(isNaN(hs)||isNaN(as))continue;
+      const isHome=String(e.idHomeTeam)===String(sdbId);
+      const mygf=isHome?hs:as,myga=isHome?as:hs;
+      GF+=mygf;GA+=myga;
+      if(mygf>myga)W++;else if(mygf===myga)D++;else L++;
+    }
+    const played=W+D+L;
+    // Trofei da SDB
+    const trophies=(trophiesR?.trophies||[]).map(t=>({
+      name:t.strTrophy||'',
+      season:t.strSeason||'',
+      league:t.strLeague||'',
+      country:t.strCountry||'',
+    }));
+    res.json({
+      stats:played>0?{played,W,D,L,GF,GA,season}:null,
+      trophies,
+    });
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+
 app.get('/diag',async(req,res)=>{
   const results={};
   const test=async(name,fn)=>{
