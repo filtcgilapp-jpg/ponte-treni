@@ -2257,46 +2257,32 @@ app.get('/diag',async(req,res)=>{
     return{sdbId,eventsCount:(sr?.events||[]).length,firstEvent:sr?.events?.[0]?.strEvent};
   });
   // Test ESPN summary per Milan-Inter (id 737054)
-  await test('match_boxscore',async()=>{
+  await test('match_full_events',async()=>{
     const r=await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/summary?event=737054',{timeout:10000});
     const d=r.data;
-    const bs=d.boxScore||d.boxscore||{};
-    // Statistiche squadre
-    const teams=(bs.teams||[]).map(t=>({
-      team:t.team?.displayName,
-      stats:(t.statistics||[]).slice(0,8).map(s=>({name:s.name,displayValue:s.displayValue})),
-    }));
-    // Rosters
-    const ros=d.rosters||[];
-    const firstPlayer=ros[0]?.entries?.[0];
-    return{
-      boxscore_keys:Object.keys(bs),
-      teams_stats:teams,
-      roster_keys:Object.keys(ros[0]||{}),
-      player_keys:Object.keys(firstPlayer||{}),
-      player_stats:firstPlayer?.statistics?.map(s=>({name:s.name,value:s.displayValue}))?.slice(0,8),
-    };
-  });
-  await test('match_scoringplays',async()=>{
-    const r=await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/summary?event=737054',{timeout:10000});
-    const d=r.data;
-    // Cerca eventi gol/cartellini ovunque
-    const sp=d.scoringPlays||d.keyEvents||d.incidents||[];
     const header=d.header?.competitions?.[0];
-    const situations=header?.situation||{};
-    const details=(header?.details||[]).slice(0,5).map(ev=>({
+    const allDetails=(header?.details||[]).map(ev=>({
       clock:ev.clock?.displayValue,
       type:ev.type?.text,
-      text:ev.athletesInvolved?.[0]?.displayName,
+      typeId:ev.type?.id,
+      player:ev.athletesInvolved?.[0]?.displayName,
       team:ev.team?.displayName,
       scoreValue:ev.scoreValue,
+      homeScore:ev.homeScore,
+      awayScore:ev.awayScore,
+    }));
+    const bs=d.boxScore||{};
+    const allStats=(bs.teams||[]).map(t=>({
+      team:t.team?.displayName,
+      stats:(t.statistics||[]).map(s=>({name:s.name,val:s.displayValue})),
     }));
     return{
-      scoringPlays_count:sp.length,
-      details_count:(header?.details||[]).length,
-      details_sample:details,
-      situation_keys:Object.keys(situations),
-      header_keys:Object.keys(header||{}),
+      all_events:allDetails,
+      all_stats:allStats,
+      home:header?.competitors?.find(c=>c.homeAway==='home')?.team?.displayName,
+      away:header?.competitors?.find(c=>c.homeAway==='away')?.team?.displayName,
+      homeScore:header?.competitors?.find(c=>c.homeAway==='home')?.score,
+      awayScore:header?.competitors?.find(c=>c.homeAway==='away')?.score,
     };
   });
   res.json(results);
