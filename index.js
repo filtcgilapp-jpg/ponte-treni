@@ -2257,32 +2257,46 @@ app.get('/diag',async(req,res)=>{
     return{sdbId,eventsCount:(sr?.events||[]).length,firstEvent:sr?.events?.[0]?.strEvent};
   });
   // Test ESPN summary per Milan-Inter (id 737054)
-  await test('match_summary_keys',async()=>{
+  await test('match_boxscore',async()=>{
     const r=await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/summary?event=737054',{timeout:10000});
     const d=r.data;
+    const bs=d.boxScore||d.boxscore||{};
+    // Statistiche squadre
+    const teams=(bs.teams||[]).map(t=>({
+      team:t.team?.displayName,
+      stats:(t.statistics||[]).slice(0,8).map(s=>({name:s.name,displayValue:s.displayValue})),
+    }));
+    // Rosters
+    const ros=d.rosters||[];
+    const firstPlayer=ros[0]?.entries?.[0];
     return{
-      keys:Object.keys(d),
-      plays_count:(d.plays||[]).length,
-      plays_sample:(d.plays||[]).slice(0,3).map(p=>({
-        clock:p.clock?.displayValue,
-        type:p.type?.text,
-        text:p.text?.slice(0,60),
-        period:p.period?.number,
-        coordinate:p.coordinate,
-        team:p.team?.displayName,
-      })),
-      boxscore_keys:Object.keys(d.boxScore||d.boxscore||{}),
-      header_status:d.header?.competitions?.[0]?.status?.type?.shortDetail,
+      boxscore_keys:Object.keys(bs),
+      teams_stats:teams,
+      roster_keys:Object.keys(ros[0]||{}),
+      player_keys:Object.keys(firstPlayer||{}),
+      player_stats:firstPlayer?.statistics?.map(s=>({name:s.name,value:s.displayValue}))?.slice(0,8),
     };
   });
-  await test('match_playbyplay',async()=>{
-    const r=await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/playbyplay?event=737054',{timeout:10000});
+  await test('match_scoringplays',async()=>{
+    const r=await axios.get('https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/summary?event=737054',{timeout:10000});
     const d=r.data;
+    // Cerca eventi gol/cartellini ovunque
+    const sp=d.scoringPlays||d.keyEvents||d.incidents||[];
+    const header=d.header?.competitions?.[0];
+    const situations=header?.situation||{};
+    const details=(header?.details||[]).slice(0,5).map(ev=>({
+      clock:ev.clock?.displayValue,
+      type:ev.type?.text,
+      text:ev.athletesInvolved?.[0]?.displayName,
+      team:ev.team?.displayName,
+      scoreValue:ev.scoreValue,
+    }));
     return{
-      keys:Object.keys(d),
-      plays_count:(d.plays||[]).length,
-      first_play:(d.plays||[])[0],
-      last_play:(d.plays||[]).slice(-1)[0],
+      scoringPlays_count:sp.length,
+      details_count:(header?.details||[]).length,
+      details_sample:details,
+      situation_keys:Object.keys(situations),
+      header_keys:Object.keys(header||{}),
     };
   });
   res.json(results);
