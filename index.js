@@ -2299,18 +2299,65 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
     const STAT_KEYS=['possessionPct','totalShots','shotsOnTarget','wonCorners',
       'foulsCommitted','yellowCards','redCards','offsides','saves',
       'totalPasses','passPct','effectiveTackles','interceptions','effectiveClearance'];
-    const teamStats=(bs.teams||[]).map(t=>({
+    const LABEL_IT={
+      possessionPct:'Possesso',totalShots:'Tiri',shotsOnTarget:'Tiri in porta',
+      wonCorners:'Corner',foulsCommitted:'Falli',yellowCards:'Cartellini gialli',
+      redCards:'Cartellini rossi',offsides:'Fuorigioco',saves:'Parate',
+      totalPasses:'Passaggi',passPct:'% Passaggi',effectiveTackles:'Contrasti vinti',
+      interceptions:'Intercettamenti',effectiveClearance:'Respinte',
+    };
+    let teamStats=(bs.teams||[]).map(t=>({
       team:t.team?.displayName,
       teamId:String(t.team?.id||''),
       color:t.team?.color||'',
       stats:Object.fromEntries(
         (t.statistics||[])
           .filter(s=>STAT_KEYS.includes(s.name))
-          .map(s=>[s.name,{label:s.label,value:s.displayValue,raw:s.value}])
+          .map(s=>[s.name,{label:LABEL_IT[s.name]||s.label,value:s.displayValue,raw:s.value}])
       ),
     }));
+    // Fallback: se boxscore vuoto (partita finita) leggi stats da competitors header
+    if(teamStats.length===0||teamStats.every(t=>Object.keys(t.stats).length===0)){
+      teamStats=(competitors||[]).map(c=>({
+        team:c.team?.displayName||'',
+        teamId:String(c.team?.id||''),
+        color:c.team?.color||'',
+        stats:Object.fromEntries(
+          (c.statistics||c.stats||[])
+            .filter(s=>STAT_KEYS.includes(s.name||s.abbreviation))
+            .map(s=>[s.name||s.abbreviation,{
+              label:LABEL_IT[s.name||s.abbreviation]||s.label||s.displayName,
+              value:s.displayValue||String(s.value||0),
+              raw:s.value??0
+            }])
+        ),
+      }));
+    }
+    // Secondo fallback: estrai dal rosters/game info quel che c'è
+    // oppure scoreboard endpoint
+    if(teamStats.every(t=>Object.keys(t.stats).length===0)){
+      try{
+        const sb=await axios.get(
+          `https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/scoreboard`,
+          {timeout:6000}
+        );
+        const ev=(sb.data.events||[]).find(e=>String(e.id)===String(id));
+        const comp=(ev?.competitions||[])[0];
+        const sbTeams=(comp?.competitors||[]);
+        teamStats=sbTeams.map(t=>({
+          team:t.team?.displayName||'',
+          teamId:String(t.team?.id||''),
+          color:t.team?.color||'',
+          stats:Object.fromEntries(
+            (t.statistics||[])
+              .filter(s=>STAT_KEYS.includes(s.name))
+              .map(s=>[s.name,{label:LABEL_IT[s.name]||s.label,value:s.displayValue,raw:s.value??0}])
+          ),
+        }));
+      }catch{}
+    }
 
-    // ── Eventi: details + keyEvents + commentary ────────────────────────────
+    // ── Tipi evento → italiano ────────────────────────────────────────────────
     const typeMap={
       'Goal':'goal','Yellow Card':'yellow','Red Card':'red',
       'Yellow-Red Card':'red2','Substitution':'sub','Offside':'offside',
@@ -2318,62 +2365,59 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
       'Shot':'shot','Shot on Target':'shot_on','Save':'save',
       'Missed Penalty':'pen_miss','Own Goal':'own_goal',
     };
+    const typeIT={
+      goal:'Gol',own_goal:'Autogol',penalty:'Rigore',yellow:'Ammonizione',
+      red:'Espulsione',red2:'Doppio giallo',sub:'Sostituzione',corner:'Calcio d\u0027angolo',
+      foul:'Fallo',offside:'Fuorigioco',save:'Parata',shot:'Tiro',
+      shot_on:'Tiro in porta',pen_miss:'Rigore sbagliato',var:'VAR',other:'',
+    };
     const normType=t=>{
       if(!t) return 'other';
       for(const[k,v] of Object.entries(typeMap)) if(t.includes(k)) return v;
       return 'other';
     };
-    // da details (header)
-    const detailEvents=(header?.details||[]).map(ev=>({
-      clock:ev.clock?.displayValue||'',
-      type:normType(ev.type?.text),
-      typeRaw:ev.type?.text||'',
-      players:(ev.athletesInvolved||[]).map(a=>a.displayName),
-      team:ev.team?.displayName||'',
-      teamId:String(ev.team?.id||''),
-      homeScore:ev.homeScore,
-      awayScore:ev.awayScore,
-      scoringPlay:!!ev.scoringPlay,
-    }));
-    // da keyEvents
-    const keyEvents=(d.keyEvents||[]).map(ev=>({
+    const mapEvent=ev=>({
       clock:ev.clock?.displayValue||ev.time?.displayValue||'',
       type:normType(ev.type?.text||ev.shortName),
-      typeRaw:ev.type?.text||ev.shortName||'',
-      players:(ev.athletes||ev.athletesInvolved||[]).map(a=>a.displayName||a.name||''),
+      typeLabel:typeIT[normType(ev.type?.text||ev.shortName)]||'',
+      players:(ev.athletesInvolved||ev.athletes||[]).map(a=>a.displayName||a.name||''),
       team:ev.team?.displayName||'',
       teamId:String(ev.team?.id||''),
-      homeScore:ev.homeScore,
-      awayScore:ev.awayScore,
-      scoringPlay:!!ev.scoringPlay,
+      homeScore:ev.homeScore??null,
+      awayScore:ev.awayScore??null,
+      scoringPlay:!!(ev.scoringPlay),
       text:ev.text||ev.description||'',
-    }));
-    // da commentary (più dettagliato)
+    });
+
+    const detailEvents=(header?.details||[]).map(mapEvent);
+    const keyEvents=(d.keyEvents||[]).map(mapEvent);
     const commentary=(d.commentary||[]).slice(0,60).map(c=>({
       clock:c.time?.displayValue||'',
       type:normType(c.type?.text||c.shortName),
-      typeRaw:c.type?.text||c.shortName||'',
+      typeLabel:typeIT[normType(c.type?.text||c.shortName)]||'',
       text:c.text||'',
       team:c.team?.displayName||'',
+      players:[],teamId:'',homeScore:null,awayScore:null,scoringPlay:false,
     }));
 
-    // Merge eventi (priority: keyEvents > details)
-    let events=keyEvents.length>0?keyEvents:detailEvents;
-    // Ordina per minuto
     const parseClock=s=>{const m=parseInt((s||'0').replace(/\D.*$/,''));return isNaN(m)?0:m;};
+    let events=keyEvents.length>0?keyEvents:detailEvents;
     events=events.sort((a,b)=>parseClock(a.clock)-parseClock(b.clock));
 
     res.json({
       match:{
-        id:String(id),
-        league,
+        id:String(id),league,
         home:home?.team?.displayName||'',
         homeId:String(home?.team?.id||''),
         homeColor:'#'+(home?.team?.color||'cccccc'),
+        homeAlternateColor:'#'+(home?.team?.alternateColor||''),
+        homeLogo:home?.team?.logo||'',
         homeScore:home?.score||'0',
         away:away?.team?.displayName||'',
         awayId:String(away?.team?.id||''),
         awayColor:'#'+(away?.team?.color||'cccccc'),
+        awayAlternateColor:'#'+(away?.team?.alternateColor||''),
+        awayLogo:away?.team?.logo||'',
         awayScore:away?.score||'0',
         status:header?.status?.type?.shortDetail||'',
         clock:header?.status?.displayClock||'',
