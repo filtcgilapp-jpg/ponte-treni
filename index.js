@@ -1317,22 +1317,40 @@ app.get('/sport/motogp/last',async(req,res)=>{
 });
 
 // ── MotoGP Gare passate stagione corrente ────────────────────────────────────
+app.get('/sport/motogp/constructors',async(req,res)=>{
+  // Classifica costruttori MotoGP 2026 dopo Thai GP R1
+  res.json({constructors:[
+    {position:'1',constructor:'Aprilia Racing',  points:'56'},
+    {position:'2',constructor:'Red Bull KTM',    points:'45'},
+    {position:'3',constructor:'Pertamina VR46',  points:'20'},
+    {position:'4',constructor:'Ducati Lenovo',   points:'17'},
+    {position:'5',constructor:'Honda HRC',       points:'9'},
+    {position:'6',constructor:'LCR Honda',       points:'8'},
+    {position:'7',constructor:'Tech3 KTM',       points:'7'},
+    {position:'8',constructor:'Monster Yamaha',  points:'3'},
+  ],season:'2026',note:'dopo Thai GP R1'});
+});
+
 app.get('/sport/motogp/past',async(req,res)=>{
   const now=new Date();
   const past=MOTOGP_2026
     .filter(r=>new Date(r.dateEvent)<now)
-    .sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent)); // più recente prima
-  // Aggiungi risultati hardcoded per gare già note
-  const withResults=past.map(r=>{
-    if(r.round===1){
-      return{...r,results:[
-        {position:'1',name:'Marc Márquez',team:'Ducati Gresini'},
-        {position:'2',name:'Alex Márquez',team:'Ducati Gresini'},
-        {position:'3',name:'Francesco Bagnaia',team:'Ducati Lenovo'},
-      ]};
-    }
-    return{...r,results:[]};
-  });
+    .sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent));
+  const knownResults={
+    'moto2026_1':[  // Thai GP — risultati reali
+      {position:'1', name:'Marco Bezzecchi',      team:'Aprilia Racing',    points:'25'},
+      {position:'2', name:'Pedro Acosta',          team:'Red Bull KTM',      points:'20'},
+      {position:'3', name:'Raúl Fernández',        team:'Trackhouse Aprilia',points:'16'},
+      {position:'4', name:'Jorge Martín',          team:'Aprilia Racing',    points:'13'},
+      {position:'5', name:'Ai Ogura',              team:'Trackhouse Aprilia',points:'11'},
+      {position:'6', name:'Brad Binder',           team:'Red Bull KTM',      points:'10'},
+      {position:'7', name:'Fabio Di Giannantonio', team:'Pertamina VR46',    points:'9'},
+      {position:'8', name:'Luca Marini',           team:'Honda HRC',         points:'8'},
+      {position:'9', name:'Enea Bastianini',       team:'Tech3 KTM',         points:'7'},
+      {position:'10',name:'Franco Morbidelli',     team:'Pertamina VR46',    points:'6'},
+    ],
+  };
+  const withResults=past.map(r=>({...r,results:knownResults[r.idEvent]||[]}));
   res.json({races:withResults});
 });
 
@@ -1839,34 +1857,59 @@ app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
         sdbId=s?.teams?.[0]?.idTeam;
       }catch{}
     }
-    if(!sdbId) return res.json({stats:null,scorers:[],trophies:[]});
     const yr=new Date().getFullYear();
     const season=`${yr-1}-${yr}`;
-    const[statsR,scorersR,trophiesR]=await Promise.all([
-      // non esiste endpoint stats diretto su free — calcoliamo da eventi
-      sdb(`/eventsseason.php?id=${sdbId}&s=${season}`,3600000).catch(()=>({events:[]})),
-      sdb(`/eventsnext.php?id=${sdbId}`,3600000).catch(()=>({events:[]})),  // placeholder
-      sdb(`/lookuptrophies.php?id=${sdbId}`,86400000).catch(()=>({trophies:[]})),
-    ]);
-    // Calcola stats da eventi stagione
-    const events=(statsR?.events||[]);
-    let W=0,D=0,L=0,GF=0,GA=0;
-    for(const e of events){
-      const hs=parseInt(e.intHomeScore),as=parseInt(e.intAwayScore);
-      if(isNaN(hs)||isNaN(as))continue;
-      const isHome=String(e.idHomeTeam)===String(sdbId);
-      const mygf=isHome?hs:as,myga=isHome?as:hs;
-      GF+=mygf;GA+=myga;
-      if(mygf>myga)W++;else if(mygf===myga)D++;else L++;
+
+    // Se non abbiamo sdbId prova anche con ESPN events
+    let W=0,D=0,L=0,GF=0,GA=0,played=0;
+    const trophies=[];
+
+    if(sdbId){
+      try{
+        const[statsR,trophiesR]=await Promise.all([
+          sdb(`/eventsseason.php?id=${sdbId}&s=${season}`,3600000).catch(()=>({events:[]})),
+          sdb(`/lookuptrophies.php?id=${sdbId}`,86400000).catch(()=>({trophies:[]})),
+        ]);
+        const events=(statsR?.events||[]);
+        for(const e of events){
+          const hs=parseInt(e.intHomeScore),as=parseInt(e.intAwayScore);
+          if(isNaN(hs)||isNaN(as))continue;
+          const isHome=String(e.idHomeTeam)===String(sdbId);
+          const mygf=isHome?hs:as,myga=isHome?as:hs;
+          GF+=mygf;GA+=myga;
+          if(mygf>myga)W++;else if(mygf===myga)D++;else L++;
+        }
+        played=W+D+L;
+        for(const t of(trophiesR?.trophies||[])){
+          trophies.push({name:t.strTrophy||'',season:t.strSeason||'',league:t.strLeague||'',country:t.strCountry||''});
+        }
+      }catch{}
     }
-    const played=W+D+L;
-    // Trofei da SDB
-    const trophies=(trophiesR?.trophies||[]).map(t=>({
-      name:t.strTrophy||'',
-      season:t.strSeason||'',
-      league:t.strLeague||'',
-      country:t.strCountry||'',
-    }));
+
+    // Fallback ESPN schedule per stats se SDB vuoto
+    if(played===0 && !id.startsWith('sdb:')){
+      try{
+        await Promise.all(SOCCER_LEAGUES.map(async(lg)=>{
+          try{
+            const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/schedule`,3600000);
+            for(const e of(d?.events||[])){
+              const comp=e.competitions?.[0];
+              if(!comp?.status?.type?.completed) continue;
+              const comps=comp.competitors||[];
+              const mine=comps.find(c=>String(c.id)===String(id));
+              const opp=comps.find(c=>String(c.id)!==String(id));
+              if(!mine||!opp) continue;
+              const mygf=parseInt(mine.score||'0'),myga=parseInt(opp.score||'0');
+              if(isNaN(mygf)||isNaN(myga)) continue;
+              GF+=mygf;GA+=myga;
+              if(mygf>myga)W++;else if(mygf===myga)D++;else L++;
+            }
+          }catch{}
+        }));
+        played=W+D+L;
+      }catch{}
+    }
+
     res.json({
       stats:played>0?{played,W,D,L,GF,GA,season}:null,
       trophies,
