@@ -1849,31 +1849,38 @@ app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
   try{
     const id=req.params.id;
     const name=(req.query.name||'').trim();
-    // TheSportsDB: cerca team per nome e prende season stats
-    let sdbId=null;
-    if(id.startsWith('sdb:')){sdbId=id.replace('sdb:','');}
-    else{
-      // cerca per nome
-      try{
-        const s=await sdb(`/searchteams.php?t=${encodeURIComponent(name)}`,86400000);
-        sdbId=s?.teams?.[0]?.idTeam;
-      }catch{}
-    }
     const yr=new Date().getFullYear();
     const season=`${yr-1}-${yr}`;
-
-    // Se non abbiamo sdbId prova anche con ESPN events
     let W=0,D=0,L=0,GF=0,GA=0,played=0;
     const trophies=[];
+    let sdbId=null;
 
+    // 1. Risolvi sdbId
+    if(id.startsWith('sdb:')){
+      sdbId=id.replace('sdb:','');
+    } else if(name){
+      try{
+        const s=await sdb(`/searchteams.php?t=${encodeURIComponent(name)}`,86400000);
+        sdbId=s?.teams?.[0]?.idTeam||null;
+      }catch{}
+    }
+
+    // 2. Trofei da SDB (se disponibile)
     if(sdbId){
       try{
-        const[statsR,trophiesR]=await Promise.all([
-          sdb(`/eventsseason.php?id=${sdbId}&s=${season}`,3600000).catch(()=>({events:[]})),
-          sdb(`/lookuptrophies.php?id=${sdbId}`,86400000).catch(()=>({trophies:[]})),
-        ]);
-        const events=(statsR?.events||[]);
-        for(const e of events){
+        const tr=await sdb(`/lookuptrophies.php?id=${sdbId}`,86400000);
+        for(const t of(tr?.trophies||[])){
+          trophies.push({name:t.strTrophy||'',season:t.strSeason||'',league:t.strLeague||'',country:t.strCountry||''});
+        }
+      }catch{}
+    }
+
+    // 3. Stats: calcola da eventi già caricati (usa /events che funziona già)
+    // Prende gli eventi passati dall'endpoint events che già funziona
+    try{
+      if(id.startsWith('sdb:') && sdbId){
+        const statsR=await sdb(`/eventsseason.php?id=${sdbId}&s=${season}`,3600000).catch(()=>({events:[]}));
+        for(const e of(statsR?.events||[])){
           const hs=parseInt(e.intHomeScore),as=parseInt(e.intAwayScore);
           if(isNaN(hs)||isNaN(as))continue;
           const isHome=String(e.idHomeTeam)===String(sdbId);
@@ -1882,67 +1889,30 @@ app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
           if(mygf>myga)W++;else if(mygf===myga)D++;else L++;
         }
         played=W+D+L;
-        for(const t of(trophiesR?.trophies||[])){
-          trophies.push({name:t.strTrophy||'',season:t.strSeason||'',league:t.strLeague||'',country:t.strCountry||''});
-        }
-      }catch{}
-    }
-
-    // Fallback ESPN: usa team/statistics API diretta
-    if(played===0 && !id.startsWith('sdb:')){
-      try{
-        // Prova ESPN team statistics endpoint
+      } else {
+        // ESPN: calcola da tutti gli slug lega
         for(const lg of SOCCER_LEAGUES){
           try{
-            const yr=new Date().getFullYear();
-            const d=await axios.get(
-              `${ESPN}/soccer/${lg.slug}/teams/${id}/statistics`,
-              {timeout:8000,headers:{'Cache-Control':'no-cache'}}
-            );
-            const splits=d.data?.splits?.categories||[];
-            const general=splits.find(c=>c.name==='general')||splits[0];
-            const stats=general?.stats||[];
-            const getStat=n=>parseInt(stats.find(s=>s.name===n)?.value||0);
-            const gp=getStat('gamesPlayed')||getStat('GP');
-            const gw=getStat('wins')||getStat('W');
-            const gl=getStat('losses')||getStat('L');
-            const gd=getStat('ties')||getStat('D')||getStat('draws');
-            const gf=getStat('pointsFor')||getStat('goalsFor');
-            const ga=getStat('pointsAgainst')||getStat('goalsAgainst');
-            if(gp>0){W=gw;D=gd;L=gl;GF=gf;GA=ga;played=gp;break;}
-          }catch{}
-        }
-      }catch{}
-    }
-    // Ultimo fallback: calcola da schedule ESPN
-    if(played===0 && !id.startsWith('sdb:')){
-      try{
-        const allLeagueEvents=[];
-        await Promise.all(SOCCER_LEAGUES.map(async(lg)=>{
-          try{
-            const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/schedule`,3600000);
+            const d=await fetch(`${ESPN}/soccer/${lg.slug}/teams/${id}/schedule`,7200000);
             for(const e of(d?.events||[])){
               const comp=e.competitions?.[0];
-              if(!comp?.status?.type?.completed) continue;
+              if(!comp?.status?.type?.completed)continue;
               const comps=comp.competitors||[];
               const mine=comps.find(c=>String(c.id)===String(id));
               const opp=comps.find(c=>String(c.id)!==String(id));
-              if(!mine||!opp) continue;
+              if(!mine||!opp)continue;
               const mygf=parseInt(mine.score||'0'),myga=parseInt(opp.score||'0');
-              if(isNaN(mygf)||isNaN(myga)) continue;
+              if(isNaN(mygf)||isNaN(myga))continue;
               GF+=mygf;GA+=myga;
               if(mygf>myga)W++;else if(mygf===myga)D++;else L++;
             }
           }catch{}
-        }));
+        }
         played=W+D+L;
-      }catch{}
-    }
+      }
+    }catch{}
 
-    res.json({
-      stats:played>0?{played,W,D,L,GF,GA,season}:null,
-      trophies,
-    });
+    res.json({stats:played>0?{played,W,D,L,GF,GA,season}:null,trophies});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1964,19 +1934,5 @@ app.get('/diag',async(req,res)=>{
   await test('moto_sdb_riders',async()=>{const d=await sdb('/searchplayers.php?p=bagnaia',3600000);return{count:(d?.player||[]).length,first:(d?.player||[])[0]?.strPlayer};});
   res.json(results);
 });
-
-// ── PING — endpoint per wake-up da Flutter ───────────────────────────────────
-app.get('/ping',(req,res)=>res.json({ok:true,ts:new Date().toISOString()}));
-
-// ── SELF-PING ogni 14 minuti — evita sleep su Render free tier ───────────────
-// Render dorme dopo 15min di inattività; questo lo mantiene sveglio (5-20 UTC = 7-22 IT)
-// Imposta RENDER_EXTERNAL_URL=https://ponte-treni.onrender.com nelle env vars di Render
-const SELF_URL=process.env.RENDER_EXTERNAL_URL||`http://localhost:${PORT}`;
-setInterval(async()=>{
-  const h=new Date().getUTCHours();
-  if(h>=5&&h<=20){
-    try{await axios.get(`${SELF_URL}/ping`,{timeout:5000});}catch{}
-  }
-},14*60*1000);
 
 app.listen(PORT,()=>console.log(`Proxy porta ${PORT}`));
