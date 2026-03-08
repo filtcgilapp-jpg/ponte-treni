@@ -2075,14 +2075,34 @@ const IT_TROPHIES = {
 function getItTrophies(name){
   if(!name) return null;
   const n=name.toLowerCase().replace(/[^a-z0-9]/g,' ').trim();
-  // Match esatto
+  // Match esatto o inclusione chiave
   for(const [k,v] of Object.entries(IT_TROPHIES)){
-    if(n===k||n.includes(k)||k.includes(n.split(' ')[0])) return v;
+    if(n===k||n.includes(k)||k.includes(n)) return v;
   }
-  // Match parziale per parole chiave
-  const words=n.split(' ').filter(w=>w.length>2);
+  // Match su ogni parola significativa del nome (>3 chars)
+  const words=n.split(' ').filter(w=>w.length>3);
   for(const [k,v] of Object.entries(IT_TROPHIES)){
-    if(words.some(w=>k.includes(w))) return v;
+    // Il nome contiene la chiave O la chiave è contenuta in una parola del nome
+    if(words.some(w=>w===k||k.includes(w)||w.includes(k))) return v;
+  }
+  // Alias espliciti per nomi ESPN difficili
+  const aliases={
+    'lazio':'lazio','biancoceleste':'lazio',
+    'fiorentina':'fiorentina','viola':'fiorentina',
+    'atalanta':'atalanta','dea':'atalanta',
+    'torino':'torino','granata':'torino','toro':'torino',
+    'sampdoria':'sampdoria','samp':'sampdoria','blucerchiati':'sampdoria',
+    'bologna':'bologna','rossobl':'bologna',
+    'genoa':'genoa','grifone':'genoa',
+    'parma':'parma','crociati':'parma',
+    'cagliari':'cagliari','rossobl':'cagliari',
+    'verona':'verona','gialloblù':'verona','chievo':'verona',
+    'brescia':'brescia','rondinelle':'brescia',
+    'udinese':'udinese','friulani':'udinese',
+    'venezia':'venezia','arancioneroverde':'venezia',
+  };
+  for(const w of words){
+    if(aliases[w]) return IT_TROPHIES[aliases[w]]||null;
   }
   return null;
 }
@@ -2195,7 +2215,7 @@ app.get('/sport/soccer/team/:id/stats',async(req,res)=>{
       }catch{}
     }
 
-    res.json({stats:played>0?{played,W,D,L,GF,GA,season:`${yr-1}-${yr}`}:null,trophies});
+    res.json({stats:played>0?{played,W,D,L,GF,GA,season:`${yr-1}-${yr}`}:null,trophies,_debug:{name,itMatch:!!itEntry,sdbId}});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -2223,6 +2243,10 @@ app.get('/diag',async(req,res)=>{
     const r=await axios.get(`https://api.football-data.org/v4/teams/${fdId}/matches?status=FINISHED&limit=10`,{timeout:10000,headers:FD_H});
     const m=r.data?.matches||[];
     return{count:m.length,first:m[0]?.homeTeam?.name+' vs '+m[0]?.awayTeam?.name,date:m[0]?.utcDate};
+  });
+  await test('stats_name_match',async()=>{
+    const tests=['Juventus','AC Milan','FC Internazionale Milano','SS Lazio','ACF Fiorentina','Atalanta BC','AS Roma','SSC Napoli'];
+    return tests.map(n=>({name:n,match:getItTrophies(n)?.name??null}));
   });
   await test('stats_juve_sdb',async()=>{
     const s=await sdb('/searchteams.php?t=Juventus',86400000);
