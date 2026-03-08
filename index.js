@@ -1965,4 +1965,18 @@ app.get('/diag',async(req,res)=>{
   res.json(results);
 });
 
+// ── PING — endpoint per wake-up da Flutter ───────────────────────────────────
+app.get('/ping',(req,res)=>res.json({ok:true,ts:new Date().toISOString()}));
+
+// ── SELF-PING ogni 14 minuti — evita sleep su Render free tier ───────────────
+// Render dorme dopo 15min di inattività; questo lo mantiene sveglio (5-20 UTC = 7-22 IT)
+// Imposta RENDER_EXTERNAL_URL=https://ponte-treni.onrender.com nelle env vars di Render
+const SELF_URL=process.env.RENDER_EXTERNAL_URL||`http://localhost:${PORT}`;
+setInterval(async()=>{
+  const h=new Date().getUTCHours();
+  if(h>=5&&h<=20){
+    try{await axios.get(`${SELF_URL}/ping`,{timeout:5000});}catch{}
+  }
+},14*60*1000);
+
 app.listen(PORT,()=>console.log(`Proxy porta ${PORT}`));
