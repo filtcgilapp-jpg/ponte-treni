@@ -1567,6 +1567,8 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         }catch{}
       }
       // football-data fallback: CL/EL usano FD per fasi corrette, Conference non disponibile su FD free
+      const isCoppaEuropea=lg.slug==='uefa.champions'||lg.slug==='uefa.europa'||lg.slug==='uefa.conference';
+      const isCoppaNazionale=!isCoppaEuropea&&lg.isCup;
       if(lg.fd&&lg.slug!=='uefa.conference'&&events.length>0){
         // Arricchisci sempre da FD per CL/EL: stage ufficiali
         try{
@@ -1631,9 +1633,22 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           }
         }catch{}
       }
-      // Passaggio finale: classifica per data qualsiasi evento ancora senza fase
+      // Passaggio finale: per coppe europee forza sempre la fase per data (calendario ufficiale)
       for(const e of events){
-        if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'||e.round==='Champions League'||e.round==='Europa League'||e.round==='Conference League'){
+        if(isCoppaEuropea&&e.date){
+          const ed=new Date(e.date); const em=ed.getMonth()+1; const eday=ed.getDate();
+          const yr2=ed.getFullYear();
+          // Solo stagione 2025/26
+          if(yr2===2025||yr2===2026){
+            if((em>=9&&yr2===2025)||(em===1&&yr2===2026)) e.round='Fase Campionato';
+            else if(em===2&&yr2===2026) e.round='Spareggio';
+            else if(em===3&&yr2===2026) e.round='Ottavi di Finale';
+            else if(em===4&&eday<=16&&yr2===2026) e.round='Quarti di Finale';
+            else if((em===4&&eday>16&&yr2===2026)||(em===5&&eday<=28&&yr2===2026)) e.round='Semifinale';
+            else if(em===5&&eday>=29&&yr2===2026) e.round='Finale';
+            else if(em===6&&yr2===2026) e.round='Finale';
+          }
+        } else if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'||e.round==='Champions League'||e.round==='Europa League'||e.round==='Conference League'){
           e.round=mapPhaseByDate(e.date,lg.slug);
         }
       }
@@ -1641,8 +1656,6 @@ app.get('/sport/soccer/cups',async(req,res)=>{
       events.sort((a,b)=>new Date(a.date)-new Date(b.date));
       // Per coppe nazionali senza round: stima fase dal numero partite rimaste
       // (più partite = turno iniziale, meno = finale)
-      const isCoppaEuropea=lg.slug==='uefa.champions'||lg.slug==='uefa.europa'||lg.slug==='uefa.conference';
-      const isCoppaNazionale=!isCoppaEuropea&&lg.isCup;
       if(isCoppaNazionale){
         // Raggruppa per data per capire i turni
         const dateGroups=new Map();
