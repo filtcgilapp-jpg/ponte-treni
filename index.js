@@ -494,6 +494,22 @@ app.get('/sport/soccer/team/:id/events',async(req,res)=>{
     }));
 
     allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
+
+    // Applica fase corretta per coppe europee in base al calendario 2025/26
+    const euroSlugs=new Set(['uefa.champions','uefa.europa','uefa.conference']);
+    for(const e of allEvents){
+      if(!euroSlugs.has(e.leagueSlug)||!e.date) continue;
+      const ed=new Date(e.date); const em=ed.getMonth()+1; const ey=ed.getFullYear(); const eday=ed.getDate();
+      if(ey===2025&&em>=9) e.round='Fase Campionato';
+      else if(ey===2026&&em===1) e.round='Fase Campionato';
+      else if(ey===2026&&em===2) e.round='Spareggio';
+      else if(ey===2026&&em===3) e.round='Ottavi di Finale';
+      else if(ey===2026&&em===4&&eday<=20) e.round='Quarti di Finale';
+      else if(ey===2026&&em===4&&eday>20) e.round='Semifinale';
+      else if(ey===2026&&em===5&&eday<=10) e.round='Semifinale';
+      else if(ey===2026&&em===5&&eday>=20) e.round='Finale';
+    }
+
     res.json({events:allEvents});
   }catch(e){res.status(500).json({error:e.message});}
 });
