@@ -258,20 +258,16 @@ function mapPhaseByDate(dateStr, slug){
   const day=d.getDate();
   const yr=d.getFullYear();
   
-  // Stagione europea: agosto-maggio
-  // CL/EL/UECL 2024-25 e 2025-26
-  if(m>=8 && m<=10) return 'Fase Leghe';           // ago-ott: gironi/fase leghe
-  if(m===11) return 'Fase Leghe';                   // nov: ancora fase leghe
-  if(m===12) return 'Fase Leghe';                   // dic: ultima giornata fase leghe
-  if(m===1) return 'Playoff';                        // gen: playoff (andata)
-  if(m===2) return 'Playoff';                        // feb: playoff (ritorno) + sorteggi
-  if(m===3 && day<=20) return 'Ottavi di Finale';   // mar prima metà: ottavi andata
-  if(m===3 && day>20) return 'Ottavi di Finale';    // mar seconda metà: ottavi ritorno
-  if(m===4 && day<=17) return 'Quarti di Finale';   // apr prima metà: quarti
-  if(m===4 && day>17) return 'Semifinale';          // apr seconda metà: semifinali
-  if(m===5 && day<=25) return 'Semifinale';         // mag prima: semifinali ritorno
-  if(m===5 && day>25) return 'Finale';              // mag fine: finale
-  if(m===6) return 'Finale';                        // giu: finale (raro)
+  // UCL/UEL/UECL 2025/26 — calendario ufficiale
+  if(m>=9 && m<=12) return 'Fase Campionato';       // set-dic 2025: fase campionato (ex gironi)
+  if(m===1) return 'Fase Campionato';               // gen 2026: ultime giornate fase campionato
+  if(m===2) return 'Spareggio';                     // feb 2026: spareggi andata+ritorno
+  if(m===3) return 'Ottavi di Finale';              // mar 2026: ottavi andata+ritorno
+  if(m===4 && day<=16) return 'Quarti di Finale';  // 1-16 apr 2026: quarti andata+ritorno
+  if(m===4 && day>16) return 'Semifinale';          // 17-30 apr: semifinali (early)
+  if(m===5 && day<=28) return 'Semifinale';         // mag 2026: semifinali andata+ritorno
+  if(m===5 && day===30||m===5 && day>=29) return 'Finale'; // 30 mag 2026: Finale
+  if(m===6) return 'Finale';
   return 'Partite';
 }
 
@@ -655,9 +651,10 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
     allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
 
     // Raggruppa per fase, assegna fase mancante in base alla data/contesto
-    const phaseOrder=['Qualificazioni','Turno Preliminare','Fase a Gironi','Playoff',
-      'Sedicesimi di Finale','Ottavi di Finale','Quarti di Finale','Semifinale','Andata','Ritorno',
-      'Finale','Fase a Eliminazione','Fase Knockout'];
+    const phaseOrder=['Qualificazioni','Turno Preliminare','Semifinale Preliminare',
+      'Fase a Gironi','Fase Leghe','Fase Campionato','Spareggio','Playoff',
+      'Sedicesimi di Finale','Ottavi di Finale','Quarti di Finale',
+      'Semifinale','Andata','Ritorno','Finale','Fase a Eliminazione','Fase Knockout','Partite'];
     // Per eventi senza round, cerca di dedurre dalla posizione temporale
     const phaseMap=new Map();
     for(const e of allEvents){
@@ -1620,6 +1617,16 @@ app.get('/sport/soccer/cups',async(req,res)=>{
               if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'){
                 e.round=mapPhaseByDate(e.date,lg.slug);
               }
+              // Override data-driven: per UCL/UEL correggi fase se data contraddice calendario ufficiale
+              if(isCoppaEuropea&&e.date){
+                const ed=new Date(e.date); const em=ed.getMonth()+1; const eday=ed.getDate();
+                if((em>=9&&em<=12)||(em===1)) e.round='Fase Campionato';
+                else if(em===2) e.round='Spareggio';
+                else if(em===3) e.round='Ottavi di Finale';
+                else if(em===4&&eday<=16) e.round='Quarti di Finale';
+                else if(em===4&&eday>16||(em===5&&eday<=28)) e.round='Semifinale';
+                else if(em===5&&eday>=29||em===6) e.round='Finale';
+              }
             }
           }
         }catch{}
@@ -1688,8 +1695,9 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         phaseMap.get(ph).push(e);
       }
       const phaseOrder=['Qualificazioni','Turno Preliminare','Semifinale Preliminare',
-        'Fase a Gironi','Fase Leghe','Playoff','Sedicesimi di Finale',
-        'Ottavi di Finale','Quarti di Finale','Semifinale','Andata','Ritorno','Finale',
+        'Fase a Gironi','Fase Leghe','Fase Campionato','Spareggio','Playoff',
+        'Sedicesimi di Finale','Ottavi di Finale','Quarti di Finale',
+        'Semifinale','Andata','Ritorno','Finale',
         'Fase a Eliminazione','Fase Knockout','Partite'];
       const phases=[...phaseMap.entries()]
         .sort((a,b)=>{const ai=phaseOrder.indexOf(a[0]),bi=phaseOrder.indexOf(b[0]);
