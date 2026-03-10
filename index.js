@@ -251,23 +251,115 @@ function mapStage(s){
 function mapPhaseESPN(raw){ return mapStage(raw); }
 
 // Classifica fase UEFA per data (per EL/Conference dove ESPN/FD non fornisce round)
+// Calendari ufficiali coppe 2025/26 per-slug
+// Ogni coppa ha i propri range di date → fase corretta
 function mapPhaseByDate(dateStr, slug){
   if(!dateStr) return 'Partite';
   const d=new Date(dateStr);
-  const m=d.getMonth()+1; // 1-12
+  const m=d.getMonth()+1;
   const day=d.getDate();
   const yr=d.getFullYear();
-  
-  // UCL/UEL/UECL 2025/26 — calendario ufficiale
-  if(m>=9 && m<=12) return 'Fase Campionato';       // set-dic 2025: fase campionato (ex gironi)
-  if(m===1) return 'Fase Campionato';               // gen 2026: ultime giornate fase campionato
-  if(m===2) return 'Spareggio';                     // feb 2026: spareggi andata+ritorno
-  if(m===3) return 'Ottavi di Finale';              // mar 2026: ottavi andata+ritorno
-  if(m===4 && day<=16) return 'Quarti di Finale';  // 1-16 apr 2026: quarti andata+ritorno
-  if(m===4 && day>16) return 'Semifinale';          // 17-30 apr: semifinali (early)
-  if(m===5 && day<=28) return 'Semifinale';         // mag 2026: semifinali andata+ritorno
-  if(m===5 && day===30||m===5 && day>=29) return 'Finale'; // 30 mag 2026: Finale
-  if(m===6) return 'Finale';
+
+  // ── Champions League ──────────────────────────────────────────────────────
+  if(slug==='uefa.champions'){
+    if(yr===2025&&m>=9) return 'Fase Campionato';
+    if(yr===2026&&m===1) return 'Fase Campionato';
+    if(yr===2026&&m===2) return 'Spareggio';
+    if(yr===2026&&m===3) return 'Ottavi di Finale';
+    if(yr===2026&&m===4&&day<=15) return 'Quarti di Finale';
+    if(yr===2026&&m===4&&day>=28) return 'Semifinale';
+    if(yr===2026&&m===5&&day<=6) return 'Semifinale';
+    if(yr===2026&&m===5&&day>=30) return 'Finale';
+    if(yr===2026&&m===6) return 'Finale';
+    return 'Partite';
+  }
+
+  // ── Europa League ─────────────────────────────────────────────────────────
+  if(slug==='uefa.europa'){
+    if(yr===2025&&m>=9) return 'Fase Campionato';
+    if(yr===2026&&m===1) return 'Fase Campionato';
+    if(yr===2026&&m===2) return 'Spareggio';
+    if(yr===2026&&m===3) return 'Ottavi di Finale';
+    if(yr===2026&&m===4&&day<=16) return 'Quarti di Finale';
+    if(yr===2026&&m===4&&day>=30) return 'Semifinale';
+    if(yr===2026&&m===5&&day<=7) return 'Semifinale';
+    if(yr===2026&&m===5&&day>=20) return 'Finale';
+    return 'Partite';
+  }
+
+  // ── Conference League ─────────────────────────────────────────────────────
+  if(slug==='uefa.conference'){
+    if(yr===2025&&m>=10&&m<=12) return 'Fase Campionato';
+    if(yr===2026&&m===2) return 'Spareggio';
+    if(yr===2026&&m===3) return 'Ottavi di Finale';
+    if(yr===2026&&m===4&&day<=16) return 'Quarti di Finale';
+    if(yr===2026&&m===4&&day>=30) return 'Semifinale';
+    if(yr===2026&&m===5&&day<=7) return 'Semifinale';
+    if(yr===2026&&m===5&&day>=27) return 'Finale';
+    return 'Partite';
+  }
+
+  // ── Coppa Italia ──────────────────────────────────────────────────────────
+  if(slug==='ita.coppa_italia'){
+    if(yr===2025&&m>=8&&m<=9) return 'Turno Preliminare';
+    if(yr===2025&&m===10) return 'Sedicesimi di Finale';
+    if(yr===2025&&m===11) return 'Sedicesimi di Finale';
+    if(yr===2025&&m===12) return 'Ottavi di Finale';
+    if(yr===2026&&m===1) return 'Ottavi di Finale';
+    if(yr===2026&&m===2) return 'Quarti di Finale';
+    if(yr===2026&&m===3) return 'Quarti di Finale';
+    if(yr===2026&&m===4) return 'Semifinale';
+    if(yr===2026&&m===5) return 'Finale';
+    return 'Partite';
+  }
+
+  // ── Copa del Rey ──────────────────────────────────────────────────────────
+  if(slug==='esp.copa_del_rey'){
+    if(yr===2025&&m>=10&&m<=11) return 'Primo Turno';
+    if(yr===2025&&m===12) return 'Sedicesimi di Finale';
+    if(yr===2026&&m===1) return 'Ottavi di Finale';
+    if(yr===2026&&m===2) return 'Quarti di Finale';
+    if(yr===2026&&m===3) return 'Semifinale';
+    if(yr===2026&&m===4&&day<=18) return 'Finale';
+    return 'Partite';
+  }
+
+  // ── FA Cup ────────────────────────────────────────────────────────────────
+  if(slug==='eng.fa'){
+    if(yr===2025&&m>=8&&m<=10) return 'Turno Qualificazione';
+    if(yr===2025&&m===11) return 'Primo Turno';
+    if(yr===2025&&m===12) return 'Secondo Turno';
+    if(yr===2026&&m===1) return 'Terzo Turno';
+    if(yr===2026&&m===2) return 'Quarto Turno';
+    if(yr===2026&&m===3) return 'Quinto Turno';
+    if(yr===2026&&m===4&&day<=5) return 'Quarti di Finale';
+    if(yr===2026&&m===4&&day>=25) return 'Semifinale';
+    if(yr===2026&&m===5) return 'Finale';
+    return 'Partite';
+  }
+
+  // ── DFB Pokal ─────────────────────────────────────────────────────────────
+  if(slug==='ger.dfb_pokal'){
+    if(yr===2025&&m===8) return 'Primo Turno';
+    if(yr===2025&&(m===10||m===11)) return 'Secondo Turno';
+    if(yr===2025&&m===12) return 'Ottavi di Finale';
+    if(yr===2026&&m===2) return 'Quarti di Finale';
+    if(yr===2026&&m===4) return 'Semifinale';
+    if(yr===2026&&m===5) return 'Finale';
+    return 'Partite';
+  }
+
+  // ── Coppa di Francia ──────────────────────────────────────────────────────
+  if(slug==='fra.coupe_de_france'){
+    if(yr===2025&&m>=9&&m<=12) return 'Turno Regionale';
+    if(yr===2026&&m===1) return 'Sedicesimi di Finale';
+    if(yr===2026&&m===2) return 'Ottavi di Finale';
+    if(yr===2026&&m===3) return 'Quarti di Finale';
+    if(yr===2026&&m===4) return 'Semifinale';
+    if(yr===2026&&m===5) return 'Finale';
+    return 'Partite';
+  }
+
   return 'Partite';
 }
 
@@ -495,19 +587,13 @@ app.get('/sport/soccer/team/:id/events',async(req,res)=>{
 
     allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
 
-    // Applica fase corretta per coppe europee in base al calendario 2025/26
-    const euroSlugs=new Set(['uefa.champions','uefa.europa','uefa.conference']);
+    // Applica fase corretta per tutte le coppe (europee e nazionali) in base al calendario per-slug
+    const cupSlugs=new Set(['uefa.champions','uefa.europa','uefa.conference',
+      'ita.coppa_italia','esp.copa_del_rey','eng.fa','ger.dfb_pokal','fra.coupe_de_france']);
     for(const e of allEvents){
-      if(!euroSlugs.has(e.leagueSlug)||!e.date) continue;
-      const ed=new Date(e.date); const em=ed.getMonth()+1; const ey=ed.getFullYear(); const eday=ed.getDate();
-      if(ey===2025&&em>=9) e.round='Fase Campionato';
-      else if(ey===2026&&em===1) e.round='Fase Campionato';
-      else if(ey===2026&&em===2) e.round='Spareggio';
-      else if(ey===2026&&em===3) e.round='Ottavi di Finale';
-      else if(ey===2026&&em===4&&eday<=20) e.round='Quarti di Finale';
-      else if(ey===2026&&em===4&&eday>20) e.round='Semifinale';
-      else if(ey===2026&&em===5&&eday<=10) e.round='Semifinale';
-      else if(ey===2026&&em===5&&eday>=20) e.round='Finale';
+      if(!cupSlugs.has(e.leagueSlug)||!e.date) continue;
+      const ph=mapPhaseByDate(e.date,e.leagueSlug);
+      if(ph&&ph!=='Partite') e.round=ph;
     }
 
     res.json({events:allEvents});
@@ -1635,36 +1721,23 @@ app.get('/sport/soccer/cups',async(req,res)=>{
               if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'){
                 e.round=mapPhaseByDate(e.date,lg.slug);
               }
-              // Override data-driven: per UCL/UEL correggi fase se data contraddice calendario ufficiale
+              // Override data-driven: per coppe europee forza fase da calendario ufficiale per-slug
               if(isCoppaEuropea&&e.date){
-                const ed=new Date(e.date); const em=ed.getMonth()+1; const eday=ed.getDate();
-                if((em>=9&&em<=12)||(em===1)) e.round='Fase Campionato';
-                else if(em===2) e.round='Spareggio';
-                else if(em===3) e.round='Ottavi di Finale';
-                else if(em===4&&eday<=16) e.round='Quarti di Finale';
-                else if(em===4&&eday>16||(em===5&&eday<=28)) e.round='Semifinale';
-                else if(em===5&&eday>=29||em===6) e.round='Finale';
+                e.round=mapPhaseByDate(e.date,lg.slug);
               }
             }
           }
         }catch{}
       }
-      // Passaggio finale: per coppe europee forza sempre la fase per data (calendario ufficiale)
+      // Passaggio finale: forza fase corretta per-slug su tutte le coppe
       for(const e of events){
         if(isCoppaEuropea&&e.date){
-          const ed=new Date(e.date); const em=ed.getMonth()+1; const eday=ed.getDate();
-          const yr2=ed.getFullYear();
-          // Solo stagione 2025/26
-          if(yr2===2025||yr2===2026){
-            if((em>=9&&yr2===2025)||(em===1&&yr2===2026)) e.round='Fase Campionato';
-            else if(em===2&&yr2===2026) e.round='Spareggio';
-            else if(em===3&&yr2===2026) e.round='Ottavi di Finale';
-            else if(em===4&&eday<=16&&yr2===2026) e.round='Quarti di Finale';
-            else if((em===4&&eday>16&&yr2===2026)||(em===5&&eday<=28&&yr2===2026)) e.round='Semifinale';
-            else if(em===5&&eday>=29&&yr2===2026) e.round='Finale';
-            else if(em===6&&yr2===2026) e.round='Finale';
-          }
-        } else if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'||e.round==='Champions League'||e.round==='Europa League'||e.round==='Conference League'){
+          e.round=mapPhaseByDate(e.date,lg.slug);
+        } else if(isCoppaNazionale&&e.date&&(!e.round||e.round==='Partite')){
+          const ph=mapPhaseByDate(e.date,lg.slug);
+          if(ph!=='Partite') e.round=ph;
+        } else if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'||
+                  e.round==='Champions League'||e.round==='Europa League'||e.round==='Conference League'){
           e.round=mapPhaseByDate(e.date,lg.slug);
         }
       }
@@ -1673,39 +1746,31 @@ app.get('/sport/soccer/cups',async(req,res)=>{
       // Per coppe nazionali senza round: stima fase dal numero partite rimaste
       // (più partite = turno iniziale, meno = finale)
       if(isCoppaNazionale){
-        // Raggruppa per data per capire i turni
+        // Fallback per fasi non coperte da mapPhaseByDate: stima da conteggio partite
         const dateGroups=new Map();
         for(const e of events){
-          const wk=e.date?e.date.slice(0,7):''; // YYYY-MM
+          const wk=e.date?e.date.slice(0,7):'';
           if(!dateGroups.has(wk))dateGroups.set(wk,[]);
           dateGroups.get(wk).push(e);
         }
-        // Ordina i gruppi di date
         const sortedWks=[...dateGroups.keys()].sort();
-        const totalGroups=sortedWks.length;
-        sortedWks.forEach((wk,i)=>{
+        sortedWks.forEach((wk)=>{
           const grpEvs=dateGroups.get(wk);
+          // Solo gli eventi senza round assegnato da mapPhaseByDate
+          const missing=grpEvs.filter(e=>!e.round||e.round==='Partite');
+          if(missing.length===0) return;
           const cnt=grpEvs.length;
-          // Stima fase dal numero partite e posizione nella stagione
           let phase='';
-          if(!phase){
-            // Usa già il round se disponibile
-            const existingRound=grpEvs.find(e=>e.round&&e.round!=='Partite')?.round;
-            if(existingRound) phase=existingRound;
-          }
-          if(!phase){
-            if(cnt>=32) phase='Turno Preliminare';
-            else if(cnt>=16) phase='Sedicesimi di Finale';
-            else if(cnt>=8) phase='Ottavi di Finale';
-            else if(cnt>=4) phase='Quarti di Finale';
-            else if(cnt>=2) phase='Semifinale';
-            else if(cnt===1) phase='Finale';
-            else phase='Turno';
-          }
-          // Assegna la fase agli eventi del gruppo se non hanno round
-          for(const e of grpEvs){
-            if(!e.round||e.round==='Partite') e.round=phase;
-          }
+          const existingRound=grpEvs.find(e=>e.round&&e.round!=='Partite')?.round;
+          if(existingRound){ phase=existingRound; }
+          else if(cnt>=32) phase='Turno Preliminare';
+          else if(cnt>=16) phase='Sedicesimi di Finale';
+          else if(cnt>=8) phase='Ottavi di Finale';
+          else if(cnt>=4) phase='Quarti di Finale';
+          else if(cnt>=2) phase='Semifinale';
+          else if(cnt===1) phase='Finale';
+          else phase='Turno';
+          for(const e of missing) e.round=phase;
         });
       }
 
@@ -2331,6 +2396,16 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
     const home=competitors.find(c=>c.homeAway==='home');
     const away=competitors.find(c=>c.homeAway==='away');
     const bs=d.boxScore||d.boxscore||{};
+    // Se ESPN non ha dati (partita troppo vecchia o coppa non supportata)
+    if(!header&&!d.boxScore&&!d.keyEvents?.length){
+      return res.json({
+        match:{id:String(id),league,
+          home:'',homeId:'',homeColor:'#1a1a2e',homeAlternateColor:'',homeLogo:'',homeScore:'?',
+          away:'',awayId:'',awayColor:'#16213e',awayAlternateColor:'',awayLogo:'',awayScore:'?',
+          status:'Dati non disponibili',clock:'',state:'post',period:1},
+        teamStats:[],events:[],commentary:[],hasKeyEvents:false,noData:true
+      });
+    }
 
     // ── Statistiche squadre ──────────────────────────────────────────────────
     const STAT_KEYS=['possessionPct','totalShots','shotsOnTarget','wonCorners',
