@@ -2403,11 +2403,53 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
   try{
     res.set('Cache-Control','no-store');
     const {league,id}=req.params;
-    const r=await axios.get(
-      `https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/summary?event=${id}`,
-      {timeout:10000,headers:{'Cache-Control':'no-cache'}}
-    );
-    const d=r.data;
+
+    // Prova ESPN /summary — se fallisce (404/timeout) usa fallback scoreboard
+    let d=null;
+    try{
+      const r=await axios.get(
+        `https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/summary?event=${id}`,
+        {timeout:12000,headers:{'Cache-Control':'no-cache'}}
+      );
+      // ESPN a volte risponde 200 con HTML invece di JSON
+      if(r.data&&typeof r.data==='object') d=r.data;
+    }catch(summaryErr){
+      // ESPN summary non disponibile — prova scoreboard come fallback
+      try{
+        const sb=await axios.get(
+          `https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/scoreboard`,
+          {timeout:8000}
+        );
+        const ev=(sb.data?.events||[]).find(e=>String(e.id)===String(id));
+        if(ev){
+          // Costruiamo una struttura compatibile con il summary
+          const comp=(ev.competitions||[])[0]||{};
+          d={
+            header:{competitions:[{
+              competitors:(comp.competitors||[]).map(c=>({
+                homeAway:c.homeAway,score:c.score,
+                team:c.team,statistics:c.statistics||[]
+              })),
+              status:comp.status,notes:comp.notes||[],
+              details:[],
+            }]},
+            boxScore:{},keyEvents:[],commentary:[],
+          };
+        }
+      }catch{}
+    }
+
+    // Se ancora nessun dato → noData
+    if(!d){
+      return res.json({
+        match:{id:String(id),league,home:'',homeId:'',homeColor:'#3a7bd5',
+          homeAlternateColor:'',homeLogo:'',homeScore:'?',away:'',awayId:'',
+          awayColor:'#e74c3c',awayAlternateColor:'',awayLogo:'',awayScore:'?',
+          status:'Dati non disponibili',clock:'',state:'post',period:1},
+        teamStats:[],events:[],commentary:[],hasKeyEvents:false,noData:true
+      });
+    }
+
     const header=d.header?.competitions?.[0];
     const competitors=header?.competitors||[];
     const home=competitors.find(c=>c.homeAway==='home');
@@ -2421,10 +2463,10 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
       return res.json({
         match:{id:String(id),league,
           home:homeName,homeId:String(home?.team?.id||''),
-          homeColor:'#'+(home?.team?.color||'1a1a2e'),homeAlternateColor:'',
+          homeColor:'#'+(home?.team?.color||'3a7bd5'),homeAlternateColor:'',
           homeLogo:home?.team?.logo||'',homeScore:home?.score||'?',
           away:awayName,awayId:String(away?.team?.id||''),
-          awayColor:'#'+(away?.team?.color||'16213e'),awayAlternateColor:'',
+          awayColor:'#'+(away?.team?.color||'e74c3c'),awayAlternateColor:'',
           awayLogo:away?.team?.logo||'',awayScore:away?.score||'?',
           status:'Dati non disponibili',clock:'',state:'post',period:1},
         teamStats:[],events:[],commentary:[],hasKeyEvents:false,noData:true
