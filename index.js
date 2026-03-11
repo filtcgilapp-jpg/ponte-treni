@@ -19,7 +19,10 @@ const ESPN ='https://site.api.espn.com/apis/site/v2/sports';
 const ESPN2='https://site.web.api.espn.com/apis/v2/sports';
 
 const VT   ='https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno';
-const VT_H ={'User-Agent':'Mozilla/5.0','Referer':'https://www.viaggiatreno.it/','Origin':'https://www.viaggiatreno.it'};
+const VT2  ='https://www.viaggiatreno.it/viaggiatrenonew/resteasy/viaggiatreno';
+const VT_H ={'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
+  'Referer':'https://www.viaggiatreno.it/','Origin':'https://www.viaggiatreno.it',
+  'Accept':'text/plain,application/json,*/*','Accept-Language':'it-IT,it;q=0.9'};
 const SDB  ='https://www.thesportsdb.com/api/v1/json/123';
 const FD   ='https://api.football-data.org/v4';
 const FD_H ={'X-Auth-Token':'138a06978b4b4c11b8fada4a4b9247de'};
@@ -430,15 +433,43 @@ app.get('/news',async(req,res)=>{
 app.get('/treno/:numero',async(req,res)=>{
   try{
     const n=req.params.numero;
-    const a=await axios.get(`${VT}/cercaNumeroTrenoTrenoAutocomplete/${n}`,{headers:VT_H,timeout:12000,responseType:'text'});
-    const b1=(a.data||'').toString().trim();
-    if(!b1||!b1.includes('|'))return res.status(404).json({error:`Treno ${n} non trovato.`});
-    const parts=b1.split('\n')[0].split('|')[1].trim().split('-');
-    if(parts.length<2)return res.status(404).json({error:'Formato non riconosciuto.'});
-    const r2=await axios.get(`${VT}/andamentoTreno/${parts[1]}/${parts[0]}/${parts[2]||Date.now()}`,{headers:VT_H,timeout:12000,responseType:'text'});
-    const b2=(r2.data||'').toString().trim();
-    if(!b2||b2.startsWith('<'))return res.status(404).json({error:'Dati non disponibili.'});
-    let p;try{p=JSON.parse(b2);}catch{return res.status(404).json({error:`Treno ${n} non attivo.`});}
+    // Step 1: cerca numero treno — prova prima VT, poi VT2 come fallback
+    let b1='';
+    try{
+      const a=await axios.get(`${VT}/cercaNumeroTrenoTrenoAutocomplete/${n}`,{headers:VT_H,timeout:15000,responseType:'text'});
+      b1=(a.data||'').toString().trim();
+    }catch{
+      try{
+        const a2=await axios.get(`${VT2}/cercaNumeroTrenoTrenoAutocomplete/${n}`,{headers:VT_H,timeout:15000,responseType:'text'});
+        b1=(a2.data||'').toString().trim();
+      }catch{}
+    }
+    if(!b1||!b1.includes('|'))return res.status(404).json({error:`Treno ${n} non trovato. Verifica il numero.`});
+    // Parsing risposta: "9685-TORINO PORTA NUOVA|9685-S00219-1741900800000"
+    const line=b1.split('\n')[0];
+    const afterPipe=line.split('|')[1]?.trim()||'';
+    const parts=afterPipe.split('-');
+    if(parts.length<2)return res.status(404).json({error:'Formato risposta non riconosciuto.'});
+    const codOrigine=parts[1]; // es. S00219
+    const numTreno=parts[0];   // es. 9685
+    const dataP=parts[2]||Date.now(); // timestamp ms
+    // Step 2: andamento treno — prova VT poi VT2
+    let b2='';
+    try{
+      const r2=await axios.get(`${VT}/andamentoTreno/${codOrigine}/${numTreno}/${dataP}`,{headers:VT_H,timeout:15000,responseType:'text'});
+      b2=(r2.data||'').toString().trim();
+    }catch{
+      try{
+        const r2b=await axios.get(`${VT2}/andamentoTreno/${codOrigine}/${numTreno}/${dataP}`,{headers:VT_H,timeout:15000,responseType:'text'});
+        b2=(r2b.data||'').toString().trim();
+      }catch{}
+    }
+    if(!b2||b2.startsWith('<')||b2.startsWith('{')==false&&b2.length<10){
+      return res.status(404).json({error:`Dati treno ${n} non disponibili. Il treno potrebbe non essere in circolazione oggi.`});
+    }
+    let p;
+    try{p=JSON.parse(b2);}
+    catch{return res.status(404).json({error:`Treno ${n} non attivo o dati non disponibili.`});}
     res.json(p);
   }catch(err){res.status(500).json({error:err.message});}
 });
