@@ -853,10 +853,25 @@ app.get('/sport/soccer/:league/phases',async(req,res)=>{
     allEvents.sort((a,b)=>new Date(a.date)-new Date(b.date));
 
     // Raggruppa per fase, assegna fase mancante in base alla data/contesto
-    const phaseOrder=['Qualificazioni','Turno Preliminare','Semifinale Preliminare',
-      'Fase a Gironi','Fase Leghe','Fase Campionato','Spareggio','Playoff',
+    const phaseOrder=[
+      // Qualificazioni (Conference League e coppe nazionali turni iniziali)
+      'Turni Regionali','Turni di Qualificazione',
+      'Primo Turno Qualificazione','Secondo Turno Qualificazione','Terzo Turno Qualificazione',
+      'Play-off Qualificazione',
+      // Turni coppe nazionali
+      'Turno Preliminare','Trentaduesimi di Finale','Primo Turno','Secondo Turno',
       'Sedicesimi di Finale','Ottavi di Finale','Quarti di Finale',
-      'Semifinale','Andata','Ritorno','Finale','Fase a Eliminazione','Fase Knockout','Partite'];
+      // Fase a gironi / campionato europeo
+      'Fase a Gironi','Fase Leghe','Fase Campionato',
+      // Spareggi e knockout
+      'Spareggio','Playoff','Semifinale Preliminare','Qualificazioni',
+      // Terzo Turno FA Cup e simili
+      'Terzo Turno','Quarto Turno','Quinto Turno',
+      // Fasi finali
+      'Semifinale','Andata','Ritorno','Finale',
+      // Fallback
+      'Fase a Eliminazione','Fase Knockout','Altra Fase','Partite',
+    ];
     // Per eventi senza round, cerca di dedurre dalla posizione temporale
     const phaseMap=new Map();
     for(const e of allEvents){
