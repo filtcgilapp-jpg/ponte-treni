@@ -1728,9 +1728,10 @@ app.get('/sport/soccer/cups',async(req,res)=>{
     const now=new Date();
     const yyyymmdd=d=>d.toISOString().slice(0,10).replace(/-/g,'');
     const ranges=[
-      `20250801-20251030`,  // Fase a gironi / qualificazioni
-      `20251030-20260131`,  // Ottavi / quarti invernali
-      `${yyyymmdd(new Date(now.getTime()-30*864e5))}-${yyyymmdd(new Date(now.getTime()+90*864e5))}`, // recente + prossimi 3 mesi
+      `20250701-20250901`,  // UECL qualificazioni luglio-agosto
+      `20250901-20251101`,  // Coppe nazionali turni iniziali + UECL play-off
+      `20251101-20260201`,  // Fase campionato + ottavi invernali
+      `20260201-20260701`,  // Quarti, semifinali, finali
     ];
     const results=[];
     for(const lg of CUP_LEAGUES){
@@ -1826,9 +1827,11 @@ app.get('/sport/soccer/cups',async(req,res)=>{
                 }
               }
               const stageByDate=fdDateStage.get(dk)||'';
-              const isGeneric=!e.round||e.round==='Champions League'||
-                e.round==='Europa League'||e.round==='Conference League'||
-                e.round==='Fase Knockout'||e.round==='Partite';
+              const isGeneric=!e.round||e.round===''||
+                e.round==='Champions League'||e.round==='Europa League'||
+                e.round==='Conference League'||e.round==='Fase Knockout'||
+                e.round==='Fase a Eliminazione'||e.round==='Altra Fase'||
+                e.round==='Partite';
               if(isGeneric||(stageByTeam&&stageByTeam!==e.round)){
                 e.round=stageByTeam||stageByDate||e.round||'';
               }
@@ -1845,15 +1848,18 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         }catch{}
       }
       // Passaggio finale: forza fase corretta per-slug su tutte le coppe
+      // Passaggio finale: mapPhaseByDate è la fonte autoritativa per tutte le coppe
       for(const e of events){
-        if(isCoppaEuropea&&e.date){
-          e.round=mapPhaseByDate(e.date,lg.slug);
-        } else if(isCoppaNazionale&&e.date&&(!e.round||e.round==='Partite')){
-          const ph=mapPhaseByDate(e.date,lg.slug);
-          if(ph!=='Partite') e.round=ph;
-        } else if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'||
-                  e.round==='Champions League'||e.round==='Europa League'||e.round==='Conference League'){
-          e.round=mapPhaseByDate(e.date,lg.slug);
+        if(!e.date) continue;
+        const ph=mapPhaseByDate(e.date,lg.slug);
+        if(ph){
+          // Se abbiamo una fase dal calendario ufficiale, usala sempre
+          e.round=ph;
+        } else if(!e.round||e.round==='Fase a Eliminazione'||e.round==='Fase Knockout'||
+                  e.round==='Altra Fase'||e.round==='Partite'||e.round===''){
+          // Nessuna fase da calendario e round generico: lascia quello di ESPN se specifico
+          // altrimenti assegna "Partite" come fallback
+          if(!e.round) e.round='Partite';
         }
       }
       if(events.length===0)continue;
@@ -1903,11 +1909,18 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         if(!phaseMap.has(ph))phaseMap.set(ph,[]);
         phaseMap.get(ph).push(e);
       }
-      const phaseOrder=['Qualificazioni','Turno Preliminare','Semifinale Preliminare',
-        'Fase a Gironi','Fase Leghe','Fase Campionato','Spareggio','Playoff',
-        'Sedicesimi di Finale','Ottavi di Finale','Quarti di Finale',
+      const phaseOrder=[
+        'Turni Regionali','Turni di Qualificazione',
+        'Primo Turno Qualificazione','Secondo Turno Qualificazione','Terzo Turno Qualificazione',
+        'Play-off Qualificazione','Turno Preliminare','Qualificazioni','Semifinale Preliminare',
+        'Trentaduesimi di Finale','Primo Turno','Secondo Turno',
+        'Fase a Gironi','Fase Leghe','Fase Campionato',
+        'Spareggio','Playoff',
+        'Sedicesimi di Finale','Terzo Turno','Ottavi di Finale',
+        'Quarto Turno','Quarti di Finale','Quinto Turno',
         'Semifinale','Andata','Ritorno','Finale',
-        'Fase a Eliminazione','Fase Knockout','Partite'];
+        'Fase a Eliminazione','Fase Knockout','Altra Fase','Partite',
+      ];
       const phases=[...phaseMap.entries()]
         .sort((a,b)=>{const ai=phaseOrder.indexOf(a[0]),bi=phaseOrder.indexOf(b[0]);
           return ai>=0&&bi>=0?ai-bi:ai>=0?-1:bi>=0?1:0;})
@@ -2667,6 +2680,32 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
 
     const detailEvents=(header?.details||[]).map(mapEvent);
     const keyEvents=(d.keyEvents||[]).map(mapEvent);
+
+    // Arricchisci con scoringPlays: nome giocatore più affidabile per i gol
+    const scoringPlaysMap=new Map();
+    for(const sp of(d.scoringPlays||[])){
+      const clock=sp.clock?.displayValue||'';
+      // Nome: prima da athletesInvolved, poi da testo
+      let playerName='';
+      if(sp.athletesInvolved?.length) playerName=sp.athletesInvolved[0].displayName||'';
+      if(!playerName&&sp.text){
+        // Testo es: "Lautaro Martinez 67'" → prende tutto prima del minuto
+        const m=sp.text.match(/^(.+?)\s+\d+[''']?\s*(?:\(|$)/);
+        if(m) playerName=m[1].trim();
+        else playerName=sp.text.split(' ').slice(0,2).join(' ');
+      }
+      if(clock&&playerName) scoringPlaysMap.set(clock,playerName);
+    }
+    // Applica nome da scoringPlays agli eventi goal
+    const enrichGoals=evs=>evs.map(ev=>{
+      if((ev.type==='goal'||ev.type==='own_goal'||ev.type==='penalty')&&ev.clock){
+        const spName=scoringPlaysMap.get(ev.clock);
+        if(spName&&(!ev.players||ev.players.length===0)){
+          return {...ev,players:[spName]};
+        }
+      }
+      return ev;
+    });
     const commentary=(d.commentary||[]).slice(0,60).map(c=>({
       clock:c.time?.displayValue||'',
       type:normType(c.type?.text||c.shortName),
@@ -2677,7 +2716,9 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
     }));
 
     const parseClock=s=>{const m=parseInt((s||'0').replace(/\D.*$/,''));return isNaN(m)?0:m;};
-    let events=keyEvents.length>0?keyEvents:detailEvents;
+    const enrichedKey=enrichGoals(keyEvents);
+    const enrichedDetail=enrichGoals(detailEvents);
+    let events=enrichedKey.length>0?enrichedKey:enrichedDetail;
     events=events.sort((a,b)=>parseClock(a.clock)-parseClock(b.clock));
 
     res.json({
