@@ -2815,43 +2815,81 @@ app.get('/diag/match',async(req,res)=>{
     const away=competitors.find(c=>c.homeAway==='away');
     const bs=d.boxScore||d.boxscore||{};
     res.json({
-      // Info partita
-      match:{
-        home:home?.team?.displayName,
-        away:away?.team?.displayName,
-        homeScore:home?.score,
-        awayScore:away?.score,
-        status:header?.status?.type?.shortDetail,
-        clock:header?.status?.displayClock,
-      },
-      // Tutti gli eventi (details)
-      events:(header?.details||[]).map(ev=>({
+      match:{home:home?.team?.displayName,away:away?.team?.displayName,
+        homeScore:home?.score,awayScore:away?.score,
+        status:header?.status?.type?.shortDetail},
+      // details: struttura raw completa per ogni evento
+      details_raw:(header?.details||[]).slice(0,20).map(ev=>({
         clock:ev.clock?.displayValue,
-        type:ev.type?.text,
-        typeId:ev.type?.id,
-        player:ev.athletesInvolved?.map(a=>a.displayName),
-        team:ev.team?.displayName,
-        homeScore:ev.homeScore,
-        awayScore:ev.awayScore,
+        type_text:ev.type?.text, type_id:ev.type?.id,
+        athletesInvolved:ev.athletesInvolved?.map(a=>({
+          id:a.id,displayName:a.displayName,shortName:a.shortName,
+          position:a.position?.abbreviation
+        })),
+        text:ev.text,description:ev.description,
+        team:ev.team?.displayName,teamId:ev.team?.id,
+        homeScore:ev.homeScore,awayScore:ev.awayScore,
         scoringPlay:ev.scoringPlay,
       })),
-      // scoringPlays separati
+      // keyEvents raw
+      keyEvents_raw:(d.keyEvents||[]).slice(0,20).map(ev=>({
+        clock:ev.clock?.displayValue,
+        type_text:ev.type?.text,
+        athletesInvolved:ev.athletesInvolved?.map(a=>a.displayName),
+        text:ev.text,team:ev.team?.displayName,
+      })),
+      // scoringPlays CON athletesInvolved
       scoringPlays:(d.scoringPlays||[]).map(p=>({
         clock:p.clock?.displayValue,
-        type:p.type?.text,
-        text:p.text,
+        type:p.type?.text, text:p.text,
+        athletesInvolved:p.athletesInvolved?.map(a=>a.displayName)||[],
         team:p.team?.displayName,
-        homeScore:p.homeScore,
-        awayScore:p.awayScore,
+        homeScore:p.homeScore,awayScore:p.awayScore,
       })),
-      // Statistiche squadre
-      teamStats:(bs.teams||[]).map(t=>({
-        team:t.team?.displayName,
-        stats:(t.statistics||[]).map(s=>({name:s.name,label:s.label,value:s.displayValue})),
-      })),
-      // Tutte le top keys per debug
+      // processed: cosa manda /sport/soccer/match
+      processed_events_sample: (() => {
+        const normType=t=>{
+          if(!t) return 'other';
+          const typeMap={'Goal':'goal','Yellow Card':'yellow','Red Card':'red',
+            'Own Goal':'own_goal','Substitution':'sub','Penalty':'penalty'};
+          for(const[k,v] of Object.entries(typeMap)) if(t.includes(k)) return v;
+          return 'other';
+        };
+        const mapEv=ev=>({
+          clock:ev.clock?.displayValue||'',
+          type:normType(ev.type?.text||ev.shortName),
+          players:(ev.athletesInvolved||ev.athletes||[]).map(a=>a.displayName||a.name||''),
+          text:ev.text||'',
+          scoringPlay:!!(ev.scoringPlay),
+        });
+        const det=(header?.details||[]).map(mapEv);
+        const key=(d.keyEvents||[]).map(mapEv);
+        return (key.length>0?key:det).slice(0,15);
+      })(),
       topKeys:Object.keys(d),
     });
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// Diagnostica coppe: mostra fasi e date per una coppa specifica
+app.get('/diag/cups',async(req,res)=>{
+  try{
+    const slug=req.query.slug||'ita.coppa_italia';
+    const range=req.query.range||'20250801-20260601';
+    const d=await fetch(`${ESPN}/soccer/${slug}/scoreboard?dates=${range}`,0);
+    const events=(d?.events||[]).slice(0,30).map(e=>{
+      const comp=(e.competitions||[])[0]||{};
+      const hl=comp.notes?.[0]?.headline||comp.type?.text||'';
+      const dt=comp.date||e.date||'';
+      return{
+        id:e.id, date:dt.slice(0,10),
+        home:comp.competitors?.find(c=>c.homeAway==='home')?.team?.displayName,
+        away:comp.competitors?.find(c=>c.homeAway==='away')?.team?.displayName,
+        headline:hl, mapped:mapPhaseByDate(dt,slug),
+        status:comp.status?.type?.shortDetail,
+      };
+    });
+    res.json({slug,count:events.length,events});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
