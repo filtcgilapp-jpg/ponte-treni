@@ -256,183 +256,155 @@ function mapPhaseESPN(raw){ return mapStage(raw); }
 // Classifica fase UEFA per data (per EL/Conference dove ESPN/FD non fornisce round)
 // Calendari ufficiali coppe 2025/26 — date esatte per ogni competizione
 // Fonti: UEFA.com, Wikipedia, FFF, RFEF, DFB, FA, Lega Serie A
+// ── Fase coppa da data — calendari Wikipedia 2025/26 ────────────────────────
+// Fonte autoritativa: pagine Wikipedia ufficiali per ogni coppa.
+// Per ogni coppa mappa RANGE di date (±1 giorno buffer) → nome fase italiano.
+// Se la data non rientra in nessun range, restituisce '' (stringa vuota).
 function mapPhaseByDate(dateStr, slug){
   if(!dateStr) return '';
   const d=new Date(dateStr);
   if(isNaN(d.getTime())) return '';
   const y=d.getFullYear(), m=d.getMonth()+1, day=d.getDate();
 
-  // ── CHAMPIONS LEAGUE 2025/26 ────────────────────────────────────────────────
-  // Fase Campionato MD1-8: 16 set 2025 – 28 gen 2026
-  // Spareggio: 17-25 feb 2026 | Ottavi: 10-18 mar | Quarti: 7-15 apr
-  // Semifinali: 28 apr – 6 mag | Finale: 30 mag (Budapest)
+  // Helper: true se la data cade nel range [y1/m1/d1 — y2/m2/d2] inclusi
+  const inRange=(y1,m1,d1,y2,m2,d2)=>{
+    const ts=d.getTime();
+    const s=new Date(y1,m1-1,d1).getTime();
+    const e=new Date(y2,m2-1,d2,23,59,59).getTime();
+    return ts>=s&&ts<=e;
+  };
+
+  // ── CHAMPIONS LEAGUE 2025/26 (fonte: UEFA.com) ───────────────────────────
   if(slug==='uefa.champions'){
-    if(y===2025&&m>=9&&m<=12)                         return 'Fase Campionato';
-    if(y===2026&&m===1)                               return 'Fase Campionato';
-    if(y===2026&&m===2&&day>=17&&day<=25)             return 'Spareggio';
-    if(y===2026&&m===3&&day>=10&&day<=18)             return 'Ottavi di Finale';
-    if(y===2026&&m===4&&day>=7&&day<=15)              return 'Quarti di Finale';
-    if(y===2026&&m===4&&day>=28)                      return 'Semifinale';
-    if(y===2026&&m===5&&day<=6)                       return 'Semifinale';
-    if(y===2026&&m===5&&day>=28&&day<=31)             return 'Finale';
+    if(inRange(2025,7,1,2025,9,15))   return 'Turni di Qualificazione';
+    if(inRange(2025,9,16,2026,1,31))  return 'Fase Campionato';
+    if(inRange(2026,2,10,2026,2,26))  return 'Spareggio';
+    if(inRange(2026,3,10,2026,3,19))  return 'Ottavi di Finale';
+    if(inRange(2026,4,7,2026,4,16))   return 'Quarti di Finale';
+    if(inRange(2026,4,28,2026,5,7))   return 'Semifinale';
+    if(inRange(2026,5,28,2026,5,31))  return 'Finale';
     return '';
   }
 
-  // ── EUROPA LEAGUE 2025/26 ───────────────────────────────────────────────────
-  // Fase Campionato: 25 set 2025 – 29 gen 2026
-  // Spareggio: 19-27 feb | Ottavi: 12-20 mar | Quarti: 9-17 apr
-  // Semifinali: 30 apr – 8 mag | Finale: 20 mag (Istanbul)
+  // ── EUROPA LEAGUE 2025/26 (fonte: UEFA.com) ──────────────────────────────
   if(slug==='uefa.europa'){
-    if(y===2025&&m>=9&&m<=12)                         return 'Fase Campionato';
-    if(y===2026&&m===1)                               return 'Fase Campionato';
-    if(y===2026&&m===2&&day>=19&&day<=27)             return 'Spareggio';
-    if(y===2026&&m===3&&day>=12&&day<=20)             return 'Ottavi di Finale';
-    if(y===2026&&m===4&&day>=9&&day<=17)              return 'Quarti di Finale';
-    if(y===2026&&m===4&&day>=30)                      return 'Semifinale';
-    if(y===2026&&m===5&&day<=8)                       return 'Semifinale';
-    if(y===2026&&m===5&&day>=18&&day<=22)             return 'Finale';
+    if(inRange(2025,7,1,2025,9,24))   return 'Turni di Qualificazione';
+    if(inRange(2025,9,25,2026,1,31))  return 'Fase Campionato';
+    if(inRange(2026,2,12,2026,2,28))  return 'Spareggio';
+    if(inRange(2026,3,5,2026,3,21))   return 'Ottavi di Finale';
+    if(inRange(2026,4,9,2026,4,18))   return 'Quarti di Finale';
+    if(inRange(2026,4,29,2026,5,9))   return 'Semifinale';
+    if(inRange(2026,5,18,2026,5,22))  return 'Finale';
     return '';
   }
 
-  // ── CONFERENCE LEAGUE 2025/26 — date UEFA ufficiali ────────────────────────
-  // Q1 andata: 10 lug | Q1 ritorno: 17 lug
-  // Q2 andata: 24 lug | Q2 ritorno: 31 lug
-  // Q3 andata: 7 ago  | Q3 ritorno: 14 ago
-  // PO andata: 21 ago | PO ritorno: 28 ago
-  // Fase Campionato MD1: 2 ott | MD2: 23 ott | MD3: 6 nov | MD4: 27 nov | MD5: 11 dic | MD6: 18 dic
-  // Spareggio: 19 feb (A) + 26 feb (R) | Sedicesimi: 12 mar (A) + 19 mar (R)
-  // Quarti: 9 apr (A) + 16 apr (R) | Semifinali: 30 apr (A) + 7 mag (R) | Finale: 27 mag (Lipsia)
+  // ── CONFERENCE LEAGUE 2025/26 (fonte: UEFA.com) ──────────────────────────
   if(slug==='uefa.conference'){
-    if(y===2025&&m===7&&day>=10&&day<=17)             return 'Primo Turno Qualificazione';
-    if(y===2025&&m===7&&day>=24&&day<=31)             return 'Secondo Turno Qualificazione';
-    if(y===2025&&m===8&&day>=7&&day<=14)              return 'Terzo Turno Qualificazione';
-    if(y===2025&&m===8&&day>=21&&day<=28)             return 'Play-off Qualificazione';
-    if(y===2025&&m===10)                              return 'Fase Campionato';
-    if(y===2025&&m===11)                              return 'Fase Campionato';
-    if(y===2025&&m===12&&day<=18)                     return 'Fase Campionato';
-    if(y===2026&&m===2&&day>=19&&day<=26)             return 'Spareggio';
-    if(y===2026&&m===3&&day>=12&&day<=19)             return 'Sedicesimi di Finale';
-    if(y===2026&&m===4&&day>=9&&day<=16)              return 'Quarti di Finale';
-    if(y===2026&&m===4&&day>=30)                      return 'Semifinale';
-    if(y===2026&&m===5&&day<=7)                       return 'Semifinale';
-    if(y===2026&&m===5&&day>=25&&day<=29)             return 'Finale';
+    if(inRange(2025,7,10,2025,7,17))  return 'Primo Turno Qualificazione';
+    if(inRange(2025,7,24,2025,7,31))  return 'Secondo Turno Qualificazione';
+    if(inRange(2025,8,7,2025,8,14))   return 'Terzo Turno Qualificazione';
+    if(inRange(2025,8,21,2025,8,28))  return 'Play-off Qualificazione';
+    if(inRange(2025,9,29,2025,12,19)) return 'Fase Campionato';
+    if(inRange(2026,2,19,2026,2,27))  return 'Spareggio';
+    if(inRange(2026,3,12,2026,3,20))  return 'Sedicesimi di Finale';
+    if(inRange(2026,4,9,2026,4,17))   return 'Quarti di Finale';
+    if(inRange(2026,4,30,2026,5,8))   return 'Semifinale';
+    if(inRange(2026,5,25,2026,5,29))  return 'Finale';
     return '';
   }
 
-  // ── COPPA ITALIA 2025/26 — fonte: Lega Serie A / Wikipedia / Sky Sport ──────
-  // Turno Preliminare:   9-10 ago 2025
-  // Trentaduesimi:      15-18 ago 2025
-  // Sedicesimi:         24 set 2025 (unica giornata)
-  // Ottavi (1a):         3 dic 2025
-  // Ottavi (2a):        17 dic 2025
-  // Quarti (1a):         4 feb 2026
-  // Quarti (2a):        11 feb 2026  ← fonte Sky Sport / Goal.com
-  // Semifinale andata:   4 mar 2026  (non 1 apr come alcune fonti errate)
-  // Semifinale ritorno: 22 apr 2026  (o 23 apr secondo Sky)
-  // Finale:             13 mag 2026 (Olimpico, Roma)
+  // ── COPPA ITALIA 2025/26 ─────────────────────────────────────────────────
+  // Fonte: it.wikipedia.org/wiki/Coppa_Italia_2025-2026
+  // Turno Prelim: 9-10 ago | 32esimi: 15-18 ago | 16esimi: 23-25 set
+  // Ottavi: 2-4 dic 2025 + 13-27 gen 2026 | Quarti: 4-11 feb
+  // SF andata: 3-4 mar | SF ritorno: 21-22 apr | Finale: 13 mag
   if(slug==='ita.coppa_italia'){
-    if(y===2025&&m===8&&day>=9&&day<=14)              return 'Turno Preliminare';
-    if(y===2025&&m===8&&day>=15&&day<=31)             return 'Trentaduesimi di Finale';
-    if(y===2025&&m===9&&day>=22&&day<=26)             return 'Sedicesimi di Finale';  // 24 set ±2gg buffer
-    if(y===2025&&m===12&&day>=3&&day<=4)              return 'Ottavi di Finale';
-    if(y===2025&&m===12&&day>=17&&day<=18)            return 'Ottavi di Finale';
-    if(y===2026&&m===2&&day>=4&&day<=5)               return 'Quarti di Finale';
-    if(y===2026&&m===2&&day>=10&&day<=12)             return 'Quarti di Finale';
-    if(y===2026&&m===3&&day>=3&&day<=5)               return 'Semifinale';
-    if(y===2026&&m===4&&day>=21&&day<=23)             return 'Semifinale';
-    if(y===2026&&m===5&&day>=12&&day<=14)             return 'Finale';
+    if(inRange(2025,8,9,2025,8,11))   return 'Turno Preliminare';
+    if(inRange(2025,8,15,2025,8,19))  return 'Trentaduesimi di Finale';
+    if(inRange(2025,9,22,2025,9,26))  return 'Sedicesimi di Finale';
+    if(inRange(2025,12,2,2025,12,5))  return 'Ottavi di Finale';
+    if(inRange(2026,1,12,2026,1,28))  return 'Ottavi di Finale';   // 2a gara 27 gen
+    if(inRange(2026,2,4,2026,2,12))   return 'Quarti di Finale';
+    if(inRange(2026,3,3,2026,3,5))    return 'Semifinale';
+    if(inRange(2026,4,20,2026,4,23))  return 'Semifinale';
+    if(inRange(2026,5,12,2026,5,14))  return 'Finale';
     return '';
   }
 
-  // ── COPA DEL REY 2025/26 — fonte: Wikipedia / SI.com ───────────────────────
-  // Turno Preliminare: 27 set – 1 ott 2025 (andata/ritorno, 2 gambe)
-  // Primo Turno:       28-30 ott 2025
-  // Trentaduesimi:     16 dic 2025 – 6 gen 2026
-  // Sedicesimi:        15-22 gen 2026
-  // Quarti:            3-5 feb 2026
-  // Semifinale andata: 11-12 feb 2026 | Semifinale ritorno: 3-4 mar 2026
-  // Finale:            25 apr 2026 (La Cartuja, Siviglia)
+  // ── COPA DEL REY 2025/26 ─────────────────────────────────────────────────
+  // Fonte: es.wikipedia.org/wiki/Copa_del_Rey_2025-26
+  // Prelim: 27 ago – 3 set | 1T: 26-29 ott | 16esimi: 9-12 nov
+  // Ottavi: 4-8 gen 2026 | Quarti: 21 gen (A) + 4-6 feb (R)
+  // SF: 5-6 feb (A) + 4-6 mar (R) | Finale: 26 apr
   if(slug==='esp.copa_del_rey'){
-    if(y===2025&&m===9&&day>=27)                      return 'Turno Preliminare';
-    if(y===2025&&m===10&&day<=1)                      return 'Turno Preliminare';
-    if(y===2025&&m===10&&day>=28&&day<=31)            return 'Primo Turno';
-    if(y===2025&&m===11&&day<=1)                      return 'Primo Turno';
-    if(y===2025&&m===12&&day>=16&&day<=18)            return 'Trentaduesimi di Finale'; // 17-18 dic
-    if(y===2026&&m===1&&day>=3&&day<=6)               return 'Trentaduesimi di Finale'; // 3-5 gen
-    if(y===2026&&m===1&&day>=15&&day<=16)             return 'Sedicesimi di Finale';     // 15-16 gen
-    if(y===2026&&m===1&&day>=28&&day<=31)             return 'Quarti di Finale';         // 28-31 gen (andata)
-    if(y===2026&&m===2&&day>=4&&day<=5)               return 'Quarti di Finale';         // 4-5 feb (ritorno)
-    if(y===2026&&m===2&&day>=11&&day<=12)             return 'Semifinale';
-    if(y===2026&&m===3&&day>=3&&day<=4)               return 'Semifinale';
-    if(y===2026&&m===4&&day>=24&&day<=26)             return 'Finale';
+    if(inRange(2025,8,27,2025,9,4))   return 'Turno Preliminare';
+    if(inRange(2025,10,25,2025,11,1)) return 'Primo Turno';
+    if(inRange(2025,11,8,2025,11,14)) return 'Sedicesimi di Finale';
+    if(inRange(2026,1,3,2026,1,9))    return 'Ottavi di Finale';
+    if(inRange(2026,1,20,2026,1,23))  return 'Quarti di Finale';
+    if(inRange(2026,2,4,2026,2,7))    return 'Quarti di Finale';
+    if(inRange(2026,2,18,2026,2,20))  return 'Semifinale';
+    if(inRange(2026,3,3,2026,3,7))    return 'Semifinale';
+    if(inRange(2026,4,24,2026,4,27))  return 'Finale';
     return '';
   }
 
-  // ── FA CUP 2025/26 — fonte: Wikipedia / Groundhopper ───────────────────────
-  // Extra Prelim: 2 ago 2025 | Qualif R1-R4: ago-ott 2025
-  // Primo Turno:   31 ott – 2 nov 2025
-  // Secondo Turno: 6-8 dic 2025
-  // Terzo Turno:   9-12 gen 2026  (PL + Championship entrano qui)
-  // Quarto Turno:  14-16 feb 2026 (Round of 32)
-  // Quinto Turno:  7-9 mar 2026   (Round of 16)
-  // Quarti:        4-7 apr 2026
-  // Semifinali:    18-19 apr 2026 (Wembley, gara unica)
-  // Finale:        16 mag 2026 (Wembley)
+  // ── FA CUP 2025/26 ───────────────────────────────────────────────────────
+  // Fonte: en.wikipedia.org/wiki/2025-26_FA_Cup
+  // Qualifying rounds: ago-ott 2025
+  // 1st Round: 1 nov + replay 11 nov | 2nd Round: 6 dic + replay 16 dic
+  // 3rd Round: 9-12 gen + replay 20 gen | 4th Round: 1-5 feb + replay 11 feb
+  // 5th Round: 25-26 feb | QF: 19-22 mar | SF: 18-19 apr | F: 16 mag
   if(slug==='eng.fa'){
-    if(y===2025&&m===8)                               return 'Turni di Qualificazione';
-    if(y===2025&&m===9)                               return 'Turni di Qualificazione';
-    if(y===2025&&m===10&&day<=30)                     return 'Turni di Qualificazione';
-    if(y===2025&&m===10&&day>=31)                     return 'Primo Turno';
-    if(y===2025&&m===11&&day<=13)                     return 'Primo Turno';  // incl. replay 11-13 nov
-    if(y===2025&&m===12&&day>=6&&day<=17)             return 'Secondo Turno'; // + replay 16-17 dic
-    if(y===2026&&m===1&&day>=9&&day<=22)              return 'Terzo Turno';   // + replay 20-22 gen
-    if(y===2026&&m===2&&day>=1&&day<=12)              return 'Quarto Turno';  // 1-5 feb + replay 11-12
-    if(y===2026&&m===2&&day>=26)                      return 'Quinto Turno';  // 26 feb – 1 mar
-    if(y===2026&&m===3&&day<=1)                       return 'Quinto Turno';
-    if(y===2026&&m===3&&day>=19&&day<=22)             return 'Quarti di Finale'; // 19-20 mar
-    if(y===2026&&m===4&&day>=18&&day<=20)             return 'Semifinale';
-    if(y===2026&&m===5&&day>=15&&day<=17)             return 'Finale';
+    if(inRange(2025,8,1,2025,10,31))  return 'Turni di Qualificazione';
+    if(inRange(2025,10,31,2025,11,15))return 'Primo Turno';
+    if(inRange(2025,12,5,2025,12,18)) return 'Secondo Turno';
+    if(inRange(2026,1,8,2026,1,22))   return 'Terzo Turno';
+    if(inRange(2026,1,30,2026,2,12))  return 'Quarto Turno';
+    if(inRange(2026,2,24,2026,3,2))   return 'Quinto Turno';
+    if(inRange(2026,3,18,2026,3,23))  return 'Quarti di Finale';
+    if(inRange(2026,4,17,2026,4,20))  return 'Semifinale';
+    if(inRange(2026,5,15,2026,5,17))  return 'Finale';
     return '';
   }
 
-  // ── DFB POKAL 2025/26 — fonte: DFB.de ──────────────────────────────────────
-  // Primo Turno:    15-18 ago 2025
-  // Secondo Turno:  28-29 ott 2025
-  // Ottavi:          2-3 dic 2025
-  // Quarti:          3-4 feb 2026
-  // Semifinali:     21-22 apr 2026
-  // Finale:         23 mag 2026 (Olympiastadion, Berlino)
+  // ── DFB POKAL 2025/26 ────────────────────────────────────────────────────
+  // Fonte: de.wikipedia.org/wiki/DFB-Pokal_2025/26
+  // 1T: 15-18 ago | 2T: 28-29 ott | Ottavi: 2-4 dic
+  // Quarti: 3-4 feb | SF: 21-22 apr | Finale: 23 mag
   if(slug==='ger.dfb_pokal'){
-    if(y===2025&&m===8&&day>=15&&day<=18)             return 'Primo Turno';
-    if(y===2025&&m===10&&day>=28&&day<=29)            return 'Secondo Turno';
-    if(y===2025&&m===12&&day>=2&&day<=3)              return 'Ottavi di Finale';
-    if(y===2026&&m===2&&day>=3&&day<=4)               return 'Quarti di Finale';
-    if(y===2026&&m===4&&day>=21&&day<=22)             return 'Semifinale';
-    if(y===2026&&m===5&&day>=22&&day<=24)             return 'Finale';
+    if(inRange(2025,8,15,2025,8,19))  return 'Primo Turno';
+    if(inRange(2025,10,27,2025,10,30))return 'Secondo Turno';
+    if(inRange(2025,12,1,2025,12,5))  return 'Ottavi di Finale';
+    if(inRange(2026,2,3,2026,2,5))    return 'Quarti di Finale';
+    if(inRange(2026,4,21,2026,4,23))  return 'Semifinale';
+    if(inRange(2026,5,22,2026,5,24))  return 'Finale';
     return '';
   }
 
-  // ── COUPE DE FRANCE 2025/26 — fonte: Wikipedia FFF ─────────────────────────
-  // Turni Regionali: ago – nov 2025 (date gestite dalle leghe regionali)
-  // Trentaduesimi:   13-14 dic 2025  (64 squadre, weekend)
-  // Sedicesimi:      17-18 gen 2026
-  // Ottavi:          7-8 feb 2026
-  // Quarti:          7-8 mar 2026   (il draw si fa fine feb)
-  // Semifinali:      22 apr 2026
-  // Finale:          23 mag 2026 (Stade de France, Saint-Denis)
+  // ── COUPE DE FRANCE 2025/26 ──────────────────────────────────────────────
+  // Fonte: fr.wikipedia.org/wiki/Coupe_de_France_de_football_2025-2026
+  // Turni Reg: ago-nov | 32esimi: 13-14 dic | 16esimi: 17-18 gen
+  // Ottavi: 7-8 feb | Quarti: 7-8 mar | SF: 22 apr | Finale: 23 mag
   if(slug==='fra.coupe_de_france'){
-    if(y===2025&&m>=8&&m<=11)                         return 'Turni Regionali';
-    if(y===2025&&m===12&&day>=13&&day<=14)            return 'Trentaduesimi di Finale';
-    if(y===2026&&m===1&&day>=17&&day<=18)             return 'Sedicesimi di Finale';
-    if(y===2026&&m===2&&day>=7&&day<=8)               return 'Ottavi di Finale';
-    if(y===2026&&m===3&&day>=7&&day<=8)               return 'Quarti di Finale';
-    if(y===2026&&m===4&&day>=21&&day<=23)             return 'Semifinale';
-    if(y===2026&&m===5&&day>=22&&day<=24)             return 'Finale';
+    if(inRange(2025,8,1,2025,11,30))  return 'Turni Regionali';
+    if(inRange(2025,12,12,2025,12,15))return 'Trentaduesimi di Finale';
+    if(inRange(2026,1,16,2026,1,19))  return 'Sedicesimi di Finale';
+    if(inRange(2026,2,6,2026,2,9))    return 'Ottavi di Finale';
+    if(inRange(2026,3,6,2026,3,9))    return 'Quarti di Finale';
+    if(inRange(2026,4,21,2026,4,23))  return 'Semifinale';
+    if(inRange(2026,5,22,2026,5,24))  return 'Finale';
     return '';
+  }
+
+  // ── SUPERCOPPE ────────────────────────────────────────────────────────────
+  if(slug==='ita.super_cup'||slug==='esp.super_cup'||slug==='uefa.super_cup'){
+    return 'Partita';
   }
 
   return '';
 }
+
 
 // ── HEALTH ────────────────────────────────────────────────────────────────────
 app.get('/',(req,res)=>res.send('OK '+new Date().toISOString()));
@@ -2726,11 +2698,32 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
       for(const[k,v] of Object.entries(typeMap)) if(t.includes(k)) return v;
       return 'other';
     };
+    const normPlayerName=raw=>{
+      if(!raw) return '';
+      // ESPN a volte manda "Surname, Name" → converti in "Name Surname"
+      const cm=raw.match(/^([^,]{2,20}),\s*(.+)$/);
+      if(cm) return (cm[2].trim()+' '+cm[1].trim()).trim();
+      return raw.trim();
+    };
     const mapEvent=ev=>({
       clock:ev.clock?.displayValue||ev.time?.displayValue||'',
       type:normType(ev.type?.text||ev.shortName),
       typeLabel:typeIT[normType(ev.type?.text||ev.shortName)]||'',
-      players:(ev.athletesInvolved||ev.athletes||[]).map(a=>a.displayName||a.name||''),
+      // Prendi SOLO il primo atleta (scorer), normalizza il formato nome
+      players:(()=>{
+        const athletes=ev.athletesInvolved||ev.athletes||[];
+        if(athletes.length>0){
+          const scorer=athletes[0];
+          const name=normPlayerName(scorer.displayName||scorer.shortName||scorer.name||'');
+          if(name) return [name];
+        }
+        // Fallback: shortText o athleteName direttamente sull'evento
+        for(const key of['shortText','athleteName','shortName']){
+          const v=(ev[key]||'').trim();
+          if(v&&v.length>2&&!/^\d/.test(v)) return [normPlayerName(v)];
+        }
+        return [];
+      })(),
       team:ev.team?.displayName||'',
       teamId:String(ev.team?.id||''),
       homeScore:ev.homeScore??null,
@@ -2764,11 +2757,21 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
     for(const sp of(d.scoringPlays||[])){
       const clock=(sp.clock?.displayValue||'').trim();
       let name='';
-      // 1. athletesInvolved
-      if(sp.athletesInvolved?.length) name=sp.athletesInvolved[0].displayName||'';
-      // 2. text
+      // 1. athletesInvolved (fonte più affidabile)
+      if(sp.athletesInvolved?.length){
+        const a=sp.athletesInvolved[0];
+        name=normPlayerName(a.displayName||a.shortName||a.name||'');
+      }
+      // 2. shortText direttamente sullo scoringPlay
+      if(!name&&sp.shortText) name=normPlayerName(sp.shortText);
+      // 3. text grezzo
       if(!name) name=nameFromText(sp.text||'');
-      if(clock&&name) scoringPlaysMap.set(clock,name);
+      if(clock&&name){
+        scoringPlaysMap.set(clock,name);
+        // Aggiungi anche versione con apostrofo normalizzato per match robusto
+        const clockNorm=clock.replace(/[''´`']/g,"'");
+        if(clockNorm!==clock) scoringPlaysMap.set(clockNorm,name);
+      }
     }
 
     // Arricchisce ogni evento goal con il nome giocatore
