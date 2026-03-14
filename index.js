@@ -333,7 +333,7 @@ function mapPhaseByDate(dateStr, slug){
   if(slug==='ita.coppa_italia'){
     if(y===2025&&m===8&&day>=9&&day<=14)              return 'Turno Preliminare';
     if(y===2025&&m===8&&day>=15&&day<=31)             return 'Trentaduesimi di Finale';
-    if(y===2025&&m===9&&day>=23&&day<=25)             return 'Sedicesimi di Finale';
+    if(y===2025&&m===9&&day>=22&&day<=26)             return 'Sedicesimi di Finale';  // 24 set ±2gg buffer
     if(y===2025&&m===12&&day>=3&&day<=4)              return 'Ottavi di Finale';
     if(y===2025&&m===12&&day>=17&&day<=18)            return 'Ottavi di Finale';
     if(y===2026&&m===2&&day>=4&&day<=5)               return 'Quarti di Finale';
@@ -357,10 +357,11 @@ function mapPhaseByDate(dateStr, slug){
     if(y===2025&&m===10&&day<=1)                      return 'Turno Preliminare';
     if(y===2025&&m===10&&day>=28&&day<=31)            return 'Primo Turno';
     if(y===2025&&m===11&&day<=1)                      return 'Primo Turno';
-    if(y===2025&&m===12&&day>=16)                     return 'Trentaduesimi di Finale';
-    if(y===2026&&m===1&&day<=6)                       return 'Trentaduesimi di Finale';
-    if(y===2026&&m===1&&day>=15&&day<=22)             return 'Sedicesimi di Finale';
-    if(y===2026&&m===2&&day>=3&&day<=5)               return 'Quarti di Finale';
+    if(y===2025&&m===12&&day>=16&&day<=18)            return 'Trentaduesimi di Finale'; // 17-18 dic
+    if(y===2026&&m===1&&day>=3&&day<=6)               return 'Trentaduesimi di Finale'; // 3-5 gen
+    if(y===2026&&m===1&&day>=15&&day<=16)             return 'Sedicesimi di Finale';     // 15-16 gen
+    if(y===2026&&m===1&&day>=28&&day<=31)             return 'Quarti di Finale';         // 28-31 gen (andata)
+    if(y===2026&&m===2&&day>=4&&day<=5)               return 'Quarti di Finale';         // 4-5 feb (ritorno)
     if(y===2026&&m===2&&day>=11&&day<=12)             return 'Semifinale';
     if(y===2026&&m===3&&day>=3&&day<=4)               return 'Semifinale';
     if(y===2026&&m===4&&day>=24&&day<=26)             return 'Finale';
@@ -382,12 +383,13 @@ function mapPhaseByDate(dateStr, slug){
     if(y===2025&&m===9)                               return 'Turni di Qualificazione';
     if(y===2025&&m===10&&day<=30)                     return 'Turni di Qualificazione';
     if(y===2025&&m===10&&day>=31)                     return 'Primo Turno';
-    if(y===2025&&m===11)                              return 'Primo Turno';
-    if(y===2025&&m===12&&day>=6&&day<=8)              return 'Secondo Turno';
-    if(y===2026&&m===1&&day>=9&&day<=12)              return 'Terzo Turno';
-    if(y===2026&&m===2&&day>=14&&day<=16)             return 'Quarto Turno';
-    if(y===2026&&m===3&&day>=7&&day<=9)               return 'Quinto Turno';
-    if(y===2026&&m===4&&day>=4&&day<=7)               return 'Quarti di Finale';
+    if(y===2025&&m===11&&day<=13)                     return 'Primo Turno';  // incl. replay 11-13 nov
+    if(y===2025&&m===12&&day>=6&&day<=17)             return 'Secondo Turno'; // + replay 16-17 dic
+    if(y===2026&&m===1&&day>=9&&day<=22)              return 'Terzo Turno';   // + replay 20-22 gen
+    if(y===2026&&m===2&&day>=1&&day<=12)              return 'Quarto Turno';  // 1-5 feb + replay 11-12
+    if(y===2026&&m===2&&day>=26)                      return 'Quinto Turno';  // 26 feb – 1 mar
+    if(y===2026&&m===3&&day<=1)                       return 'Quinto Turno';
+    if(y===2026&&m===3&&day>=19&&day<=22)             return 'Quarti di Finale'; // 19-20 mar
     if(y===2026&&m===4&&day>=18&&day<=20)             return 'Semifinale';
     if(y===2026&&m===5&&day>=15&&day<=17)             return 'Finale';
     return '';
@@ -1718,6 +1720,38 @@ const CUP_LEAGUES=[
   {slug:'ger.dfb_pokal',    name:'DFB Pokal',           fd:'DFB',  group:'Estero'},
   {slug:'fra.coupe_de_france',name:'Coupe de France',   fd:'CDF',  group:'Estero'},
 ];
+
+
+// ── Wikipedia phase fetch (per coppe nazionali) ──────────────────────────────
+// Scarica e parsa la pagina Wikipedia della coppa per estrarre date→fase
+// Cache 24h. Fallback silenzioso su mapPhaseByDate se Wikipedia non risponde.
+const wikiPhaseCache = new Map();
+async function getWikiPhasesForCup(slug){
+  const ck = `wiki_phases:${slug}`;
+  const cached = getC(ck);
+  if(cached) return cached;
+  const wikiPages = {
+    'ita.coppa_italia':   '2025–26_Coppa_Italia',
+    'esp.copa_del_rey':   '2025–26_Copa_del_Rey',
+    'eng.fa':             '2025–26_FA_Cup',
+    'ger.dfb_pokal':      '2025–26_DFB-Pokal',
+    'fra.coupe_de_france':'2025–26_Coupe_de_France',
+  };
+  const page = wikiPages[slug];
+  if(!page) return null;
+  try{
+    const url = `https://en.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(page)}&prop=sections&format=json&origin=*`;
+    const r = await axios.get(url, {timeout:8000, headers:{'User-Agent':'Mozilla/5.0 (compatible; bot)'}});
+    const sections = r.data?.parse?.sections || [];
+    // Cerca sezione "Rounds" o "Schedule" per estrarre date
+    // Per ora restituisce null — future implementation
+    setC(ck, null, 86400000);
+    return null;
+  }catch{
+    setC(ck, null, 3600000); // cache miss per 1h
+    return null;
+  }
+}
 
 app.get('/sport/soccer/cups',async(req,res)=>{
   try{
