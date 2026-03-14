@@ -337,14 +337,14 @@ function mapPhaseByDate(dateStr, slug){
   // Ottavi: 4-8 gen 2026 | Quarti: 21 gen (A) + 4-6 feb (R)
   // SF: 5-6 feb (A) + 4-6 mar (R) | Finale: 26 apr
   if(slug==='esp.copa_del_rey'){
-    if(inRange(2025,8,27,2025,9,4))   return 'Turno Preliminare';
-    if(inRange(2025,10,25,2025,11,1)) return 'Primo Turno';
-    if(inRange(2025,11,8,2025,11,14)) return 'Sedicesimi di Finale';
-    if(inRange(2026,1,3,2026,1,9))    return 'Ottavi di Finale';
-    if(inRange(2026,1,20,2026,1,23))  return 'Quarti di Finale';
-    if(inRange(2026,2,4,2026,2,7))    return 'Quarti di Finale';
-    if(inRange(2026,2,18,2026,2,20))  return 'Semifinale';
-    if(inRange(2026,3,3,2026,3,7))    return 'Semifinale';
+    // Fonte: Wikipedia Copa del Rey 2025-26 (RFEF ufficiale)
+    if(inRange(2025,8,26,2025,8,29))  return 'Turno Preliminare';
+    if(inRange(2025,10,24,2025,10,27))return 'Primo Turno';
+    if(inRange(2025,12,2,2025,12,5))  return 'Sedicesimi di Finale';
+    if(inRange(2026,1,3,2026,1,6))    return 'Ottavi di Finale';
+    if(inRange(2026,2,3,2026,2,6))    return 'Quarti di Finale';   // gara unica
+    if(inRange(2026,2,18,2026,2,21))  return 'Semifinale';         // andata
+    if(inRange(2026,4,4,2026,4,7))    return 'Semifinale';         // ritorno
     if(inRange(2026,4,24,2026,4,27))  return 'Finale';
     return '';
   }
@@ -1731,10 +1731,10 @@ app.get('/sport/soccer/cups',async(req,res)=>{
     const now=new Date();
     const yyyymmdd=d=>d.toISOString().slice(0,10).replace(/-/g,'');
     const ranges=[
-      `20250701-20250901`,  // UECL qualificazioni luglio-agosto
-      `20250901-20251101`,  // Coppe nazionali turni iniziali + UECL play-off
-      `20251101-20260201`,  // Fase campionato + ottavi invernali
-      `20260201-20260701`,  // Quarti, semifinali, finali
+      '20250701-20250930',  // UECL qualificazioni luglio-settembre
+      '20251001-20260131',  // Coppe nazionali turni + fase campionato europea
+      '20260201-20260430',  // Spareggi, ottavi, quarti, semifinali
+      '20260501-20260630',  // Finali (tutte in maggio-giugno)
     ];
     const results=[];
     for(const lg of CUP_LEAGUES){
@@ -2735,21 +2735,36 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
     const detailEvents=(header?.details||[]).map(mapEvent);
     const keyEvents=(d.keyEvents||[]).map(mapEvent);
 
-    // Estrai nome da testo ESPN (fallback robusto)
+    // Estrai nome giocatore da testo ESPN (tutti i formati noti)
     const nameFromText=txt=>{
-      if(!txt) return '';
-      // "Goal by Lautaro Martinez" / "Lautaro Martinez 67'" / "Gol di Lautaro Martinez"
-      const skipWords=new Set(['goal','gol','by','di','del','della','own','penalty','rigore',
-        'autogol','scored','scores','from','a','the','su','con','che','ha','an','for']);
-      // Rimuovi minuto (es "67'" "90+3'") e testa ogni token
-      const tokens=txt.replace(/\d+\+?\d*[''´`]?/g,' ').split(/\s+/);
-      const candidates=tokens.filter(t=>{
-        if(!t||t.length<2) return false;
-        if(skipWords.has(t.toLowerCase())) return false;
-        if(/^[^a-zA-ZÀ-ÿ]/.test(t)) return false; // inizia con punteggiatura
-        return true;
-      });
-      return candidates.slice(0,2).join(' '); // prende max 2 token (nome cognome)
+      if(!txt||txt.length<2) return '';
+      const skipWords=new Set([
+        'goal','gol','by','di','del','della','dello','dei','degli','delle',
+        'own','penalty','rigore','autogol','scored','scores','score',
+        'from','a','the','su','con','che','ha','an','for','with','after',
+        'converted','assisted','assist','header','foot','right','left',
+        'close','range','yards','metres','shot','kick','free','corner',
+        'own','aut','rig','in','is','it','to','of','and','per','un','una',
+        'il','lo','la','le','col','nel','al','dal','sul',
+      ]);
+      // Rimuovi minuto (es "67'" "90+3'" "(67')") e punteggiatura iniziale
+      let t2=txt
+        .replace(/\(?\d+\+?\d*['''´`\u2019]?\)?/g,' ')
+        .replace(/^[^a-zA-ZÀ-ÿ]+/,'')
+        .trim();
+      const tokens=t2.split(/\s+/);
+      const candidates=[];
+      for(const tok of tokens){
+        const t=tok.replace(/[.,;:()\'\"-]/g,'').trim();
+        if(t.length<2) continue;
+        if(skipWords.has(t.toLowerCase())) continue;
+        if(!/^[a-zA-ZÀ-ÿ]/.test(t)) continue;
+        // Scarta iniziali singole (tipo "L.")
+        if(t.length===2&&t[1]==='.') continue;
+        candidates.push(t);
+        if(candidates.length===2) break;
+      }
+      return candidates.join(' ');
     };
 
     // Costruisci mappa clock→nome da scoringPlays (fonte più affidabile)
@@ -2757,44 +2772,71 @@ app.get('/sport/soccer/match/:league/:id',async(req,res)=>{
     for(const sp of(d.scoringPlays||[])){
       const clock=(sp.clock?.displayValue||'').trim();
       let name='';
-      // 1. athletesInvolved (fonte più affidabile)
+      // 1. athletesInvolved (fonte più affidabile ESPN)
       if(sp.athletesInvolved?.length){
         const a=sp.athletesInvolved[0];
         name=normPlayerName(a.displayName||a.shortName||a.name||'');
       }
-      // 2. shortText direttamente sullo scoringPlay
-      if(!name&&sp.shortText) name=normPlayerName(sp.shortText);
-      // 3. text grezzo
-      if(!name) name=nameFromText(sp.text||'');
-      if(clock&&name){
-        scoringPlaysMap.set(clock,name);
-        // Aggiungi anche versione con apostrofo normalizzato per match robusto
-        const clockNorm=clock.replace(/[''´`']/g,"'");
-        if(clockNorm!==clock) scoringPlaysMap.set(clockNorm,name);
+      // 2. shortText / athleteName sull'evento
+      if(!name) for(const k of['shortText','athleteName','shortName']){
+        const v=(sp[k]||'').trim();
+        if(v&&v.length>2&&!/^\d/.test(v)){name=normPlayerName(v);break;}
       }
+      // 3. Testo grezzo
+      if(!name) name=nameFromText(sp.text||sp.description||'');
+      if(name&&name.length>1){
+        // Indicizza per clock esatto + varianti apostrofo + solo minuto numerico
+        const variants=new Set([clock]);
+        variants.add(clock.replace(/['''´`\u2019]/g,"'"));
+        const mn=clock.replace(/\D/g,'');
+        if(mn) variants.add(mn+"'");
+        if(mn) variants.add(mn+"'"); // apostrofo curvo
+        for(const v of variants) if(v) scoringPlaysMap.set(v,name);
+      }
+    }
+    // Arricchisce scoringPlaysMap anche dai details (hanno athletesInvolved per molte leghe)
+    for(const ev of(header?.details||[])){
+      if(!['Goal','Penalty','Own Goal'].includes(ev.type?.text||'')) continue;
+      const clock=(ev.clock?.displayValue||'').trim();
+      if(!clock||scoringPlaysMap.has(clock)) continue;
+      let name='';
+      if(ev.athletesInvolved?.length){
+        const a=ev.athletesInvolved[0];
+        name=normPlayerName(a.displayName||a.shortName||a.name||'');
+      }
+      if(!name) name=nameFromText(ev.text||'');
+      if(name&&name.length>1) scoringPlaysMap.set(clock,name);
     }
 
     // Arricchisce ogni evento goal con il nome giocatore
     const enrichGoals=evs=>evs.map(ev=>{
       if(ev.type!=='goal'&&ev.type!=='own_goal'&&ev.type!=='penalty') return ev;
-      // Se ha già un nome valido, tienilo
-      const existing=(ev.players||[]).filter(p=>p&&p.trim().length>1);
+      // Se ha già un nome valido (dal mapEvent), tienilo
+      const existing=(ev.players||[]).filter(p=>p&&p.trim().length>2);
       if(existing.length>0) return ev;
       const clock=(ev.clock||'').trim();
-      // 1. Cerca in scoringPlays per clock esatto
-      let name=scoringPlaysMap.get(clock)||'';
-      // 2. Cerca per clock senza apostrofo (mismatch apostrofo)
-      if(!name) name=scoringPlaysMap.get(clock.replace(/[''´`]/g,"'"))||'';
-      // 3. Cerca match parziale sul minuto numerico
-      if(!name){
-        const mn=clock.replace(/\D/g,'');
+      const mn=clock.replace(/\D/g,'');
+      // Cerca nome in scoringPlaysMap con varianti del clock
+      let name='';
+      const lookups=[
+        clock,
+        clock.replace(/['''´`\u2019]/g,"'"),
+        mn+"'",
+        mn+"'",
+        mn,
+      ];
+      for(const lk of lookups){
+        if(lk&&scoringPlaysMap.has(lk)){name=scoringPlaysMap.get(lk);break;}
+      }
+      // Fallback: cerca per minuto in tutta la mappa (match parziale)
+      if(!name&&mn){
         for(const[k,v] of scoringPlaysMap){
           if(k.replace(/\D/g,'')===mn){name=v;break;}
         }
       }
-      // 4. Tenta da ev.text
-      if(!name) name=nameFromText(ev.text||'');
-      if(name) return {...ev,players:[name]};
+      // Ultimo fallback: estrai da ev.text
+      if(!name) name=nameFromText(ev.text||ev.description||'');
+      if(name&&name.length>1) return {...ev,players:[name]};
       return ev;
     });
     const commentary=(d.commentary||[]).slice(0,60).map(c=>({
