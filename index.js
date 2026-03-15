@@ -256,25 +256,23 @@ function mapPhaseESPN(raw){ return mapStage(raw); }
 // Classifica fase UEFA per data (per EL/Conference dove ESPN/FD non fornisce round)
 // Calendari ufficiali coppe 2025/26 — date esatte per ogni competizione
 // Fonti: UEFA.com, Wikipedia, FFF, RFEF, DFB, FA, Lega Serie A
-// ── Fase coppa da data — calendari Wikipedia 2025/26 ────────────────────────
-// Fonte autoritativa: pagine Wikipedia ufficiali per ogni coppa.
-// Per ogni coppa mappa RANGE di date (±1 giorno buffer) → nome fase italiano.
-// Se la data non rientra in nessun range, restituisce '' (stringa vuota).
+// ── Fase coppa da data — calendari ufficiali 2025/26 ─────────────────────────
+// Fonte: UEFA.com, Wikipedia, RFEF, FA, DFB, FFF — verificati singolarmente.
+// inRange(y1,m1,d1, y2,m2,d2): true se la data cade nel range incluso.
 function mapPhaseByDate(dateStr, slug){
   if(!dateStr) return '';
   const d=new Date(dateStr);
   if(isNaN(d.getTime())) return '';
-  const y=d.getFullYear(), m=d.getMonth()+1, day=d.getDate();
 
-  // Helper: true se la data cade nel range [y1/m1/d1 — y2/m2/d2] inclusi
   const inRange=(y1,m1,d1,y2,m2,d2)=>{
     const ts=d.getTime();
-    const s=new Date(y1,m1-1,d1).getTime();
+    const s=new Date(y1,m1-1,d1,0,0,0).getTime();
     const e=new Date(y2,m2-1,d2,23,59,59).getTime();
     return ts>=s&&ts<=e;
   };
 
-  // ── CHAMPIONS LEAGUE 2025/26 (fonte: UEFA.com) ───────────────────────────
+  // ── CHAMPIONS LEAGUE 2025/26 ─────────────────────────────────────────────
+  // Fonte: UEFA.com
   if(slug==='uefa.champions'){
     if(inRange(2025,7,1,2025,9,15))   return 'Turni di Qualificazione';
     if(inRange(2025,9,16,2026,1,31))  return 'Fase Campionato';
@@ -286,7 +284,8 @@ function mapPhaseByDate(dateStr, slug){
     return '';
   }
 
-  // ── EUROPA LEAGUE 2025/26 (fonte: UEFA.com) ──────────────────────────────
+  // ── EUROPA LEAGUE 2025/26 ────────────────────────────────────────────────
+  // Fonte: UEFA.com
   if(slug==='uefa.europa'){
     if(inRange(2025,7,1,2025,9,24))   return 'Turni di Qualificazione';
     if(inRange(2025,9,25,2026,1,31))  return 'Fase Campionato';
@@ -298,65 +297,70 @@ function mapPhaseByDate(dateStr, slug){
     return '';
   }
 
-  // ── CONFERENCE LEAGUE 2025/26 (fonte: UEFA.com) ──────────────────────────
+  // ── CONFERENCE LEAGUE 2025/26 ────────────────────────────────────────────
+  // Fonte: UEFA.com (date esatte per ogni giornata)
   if(slug==='uefa.conference'){
-    if(inRange(2025,7,10,2025,7,17))  return 'Primo Turno Qualificazione';
-    if(inRange(2025,7,24,2025,7,31))  return 'Secondo Turno Qualificazione';
-    if(inRange(2025,8,7,2025,8,14))   return 'Terzo Turno Qualificazione';
-    if(inRange(2025,8,21,2025,8,28))  return 'Play-off Qualificazione';
-    if(inRange(2025,9,29,2025,12,19)) return 'Fase Campionato';
-    if(inRange(2026,2,19,2026,2,27))  return 'Spareggio';
-    if(inRange(2026,3,12,2026,3,20))  return 'Sedicesimi di Finale';
-    if(inRange(2026,4,9,2026,4,17))   return 'Quarti di Finale';
-    if(inRange(2026,4,30,2026,5,8))   return 'Semifinale';
-    if(inRange(2026,5,25,2026,5,29))  return 'Finale';
+    if(inRange(2025,7,10,2025,7,18))  return 'Primo Turno Qualificazione';
+    if(inRange(2025,7,24,2025,8,1))   return 'Secondo Turno Qualificazione';
+    if(inRange(2025,8,7,2025,8,15))   return 'Terzo Turno Qualificazione';
+    if(inRange(2025,8,20,2025,8,29))  return 'Play-off Qualificazione';
+    // Fase campionato: 6 giornate (25 set, 23 ott, 6 nov, 27 nov, 11 dic, 18 dic)
+    if(inRange(2025,9,23,2025,9,27))  return 'Fase Campionato';  // MD1
+    if(inRange(2025,10,21,2025,10,25))return 'Fase Campionato';  // MD2
+    if(inRange(2025,11,4,2025,11,8))  return 'Fase Campionato';  // MD3
+    if(inRange(2025,11,25,2025,11,29))return 'Fase Campionato';  // MD4
+    if(inRange(2025,12,9,2025,12,13)) return 'Fase Campionato';  // MD5
+    if(inRange(2025,12,16,2025,12,20))return 'Fase Campionato';  // MD6
+    if(inRange(2026,2,17,2026,2,28))  return 'Spareggio';
+    if(inRange(2026,3,10,2026,3,21))  return 'Sedicesimi di Finale';
+    if(inRange(2026,4,7,2026,4,18))   return 'Quarti di Finale';
+    if(inRange(2026,4,28,2026,5,9))   return 'Semifinale';
+    if(inRange(2026,5,25,2026,5,29))  return 'Finale';           // 27 mag Lipsia
     return '';
   }
 
   // ── COPPA ITALIA 2025/26 ─────────────────────────────────────────────────
-  // Fonte: it.wikipedia.org/wiki/Coppa_Italia_2025-2026
-  // Turno Prelim: 9-10 ago | 32esimi: 15-18 ago | 16esimi: 23-25 set
+  // Fonte: it.wikipedia.org/wiki/Coppa_Italia_2025-2026 (Lega Serie A)
+  // Prelim: 9-10 ago | 32esimi: 15-18 ago | 16esimi: 23-25 set
   // Ottavi: 2-4 dic 2025 + 13-27 gen 2026 | Quarti: 4-11 feb
   // SF andata: 3-4 mar | SF ritorno: 21-22 apr | Finale: 13 mag
   if(slug==='ita.coppa_italia'){
     if(inRange(2025,8,9,2025,8,11))   return 'Turno Preliminare';
     if(inRange(2025,8,15,2025,8,19))  return 'Trentaduesimi di Finale';
     if(inRange(2025,9,22,2025,9,26))  return 'Sedicesimi di Finale';
-    if(inRange(2025,12,2,2025,12,5))  return 'Ottavi di Finale';
-    if(inRange(2026,1,12,2026,1,28))  return 'Ottavi di Finale';   // 2a gara 27 gen
-    if(inRange(2026,2,4,2026,2,12))   return 'Quarti di Finale';
-    if(inRange(2026,3,3,2026,3,5))    return 'Semifinale';
+    if(inRange(2025,12,1,2025,12,5))  return 'Ottavi di Finale';
+    if(inRange(2026,1,12,2026,1,28))  return 'Ottavi di Finale';
+    if(inRange(2026,2,3,2026,2,12))   return 'Quarti di Finale';
+    if(inRange(2026,3,2,2026,3,5))    return 'Semifinale';
     if(inRange(2026,4,20,2026,4,23))  return 'Semifinale';
     if(inRange(2026,5,12,2026,5,14))  return 'Finale';
     return '';
   }
 
   // ── COPA DEL REY 2025/26 ─────────────────────────────────────────────────
-  // Fonte: es.wikipedia.org/wiki/Copa_del_Rey_2025-26
-  // Prelim: 27 ago – 3 set | 1T: 26-29 ott | 16esimi: 9-12 nov
-  // Ottavi: 4-8 gen 2026 | Quarti: 21 gen (A) + 4-6 feb (R)
-  // SF: 5-6 feb (A) + 4-6 mar (R) | Finale: 26 apr
+  // Fonte: es.wikipedia.org/wiki/Copa_del_Rey_2025-26 (RFEF)
+  // Prelim: 27-28 ago | 1T: 25-26 ott | Sedicesimi: 2-3 dic
+  // Ottavi: 4-7 gen 2026 | Quarti (gara unica): 3-6 feb
+  // SF andata: 18-19 feb | SF ritorno: 4-7 apr | Finale: 26 apr
   if(slug==='esp.copa_del_rey'){
-    // Fonte: Wikipedia Copa del Rey 2025-26 (RFEF ufficiale)
     if(inRange(2025,8,26,2025,8,29))  return 'Turno Preliminare';
     if(inRange(2025,10,24,2025,10,27))return 'Primo Turno';
-    if(inRange(2025,12,2,2025,12,5))  return 'Sedicesimi di Finale';
-    if(inRange(2026,1,3,2026,1,6))    return 'Ottavi di Finale';
-    if(inRange(2026,2,3,2026,2,6))    return 'Quarti di Finale';   // gara unica
-    if(inRange(2026,2,18,2026,2,21))  return 'Semifinale';         // andata
-    if(inRange(2026,4,4,2026,4,7))    return 'Semifinale';         // ritorno
+    if(inRange(2025,12,1,2025,12,5))  return 'Sedicesimi di Finale';
+    if(inRange(2026,1,3,2026,1,8))    return 'Ottavi di Finale';
+    if(inRange(2026,2,3,2026,2,7))    return 'Quarti di Finale';
+    if(inRange(2026,2,17,2026,2,21))  return 'Semifinale';
+    if(inRange(2026,4,3,2026,4,8))    return 'Semifinale';
     if(inRange(2026,4,24,2026,4,27))  return 'Finale';
     return '';
   }
 
   // ── FA CUP 2025/26 ───────────────────────────────────────────────────────
-  // Fonte: en.wikipedia.org/wiki/2025-26_FA_Cup
-  // Qualifying rounds: ago-ott 2025
-  // 1st Round: 1 nov + replay 11 nov | 2nd Round: 6 dic + replay 16 dic
-  // 3rd Round: 9-12 gen + replay 20 gen | 4th Round: 1-5 feb + replay 11 feb
-  // 5th Round: 25-26 feb | QF: 19-22 mar | SF: 18-19 apr | F: 16 mag
+  // Fonte: en.wikipedia.org/wiki/2025-26_FA_Cup (The FA)
+  // Qual: ago-ott 2025 | 1T: 1 nov + replay 11 | 2T: 6 dic + replay 16
+  // 3T: 9-12 gen + replay 20 | 4T: 1-5 feb + replay 11 | 5T: 25-26 feb
+  // QF: 19-22 mar | SF: 18-19 apr (Wembley) | F: 16 mag (Wembley)
   if(slug==='eng.fa'){
-    if(inRange(2025,8,1,2025,10,31))  return 'Turni di Qualificazione';
+    if(inRange(2025,8,1,2025,10,30))  return 'Turni di Qualificazione';
     if(inRange(2025,10,31,2025,11,15))return 'Primo Turno';
     if(inRange(2025,12,5,2025,12,18)) return 'Secondo Turno';
     if(inRange(2026,1,8,2026,1,22))   return 'Terzo Turno';
@@ -368,42 +372,60 @@ function mapPhaseByDate(dateStr, slug){
     return '';
   }
 
+  // ── EFL CUP (CARABAO CUP) 2025/26 ────────────────────────────────────────
+  // Fonte: en.wikipedia.org/wiki/2025-26_EFL_Cup (EFL)
+  // 1T: 13-14 ago 2025 | 2T: 27-28 ago | 3T: 17-18 set
+  // 4T (Last 16): 29-30 ott | QF: 17-18 dic | SF: 7-8 gen 2026 (andata)
+  // SF ritorno: 21-22 gen 2026 | Finale: 22 feb 2026 (Wembley)
+  if(slug==='eng.league_cup'){
+    if(inRange(2025,8,12,2025,8,15))  return 'Primo Turno';
+    if(inRange(2025,8,26,2025,8,29))  return 'Secondo Turno';
+    if(inRange(2025,9,16,2025,9,19))  return 'Terzo Turno';
+    if(inRange(2025,10,28,2025,10,31))return 'Quarto Turno';
+    if(inRange(2025,12,16,2025,12,19))return 'Quarti di Finale';
+    if(inRange(2026,1,6,2026,1,9))    return 'Semifinale';
+    if(inRange(2026,1,20,2026,1,23))  return 'Semifinale';
+    if(inRange(2026,2,21,2026,2,23))  return 'Finale';
+    return '';
+  }
+
   // ── DFB POKAL 2025/26 ────────────────────────────────────────────────────
-  // Fonte: de.wikipedia.org/wiki/DFB-Pokal_2025/26
+  // Fonte: de.wikipedia.org/wiki/DFB-Pokal_2025/26 (DFB)
   // 1T: 15-18 ago | 2T: 28-29 ott | Ottavi: 2-4 dic
-  // Quarti: 3-4 feb | SF: 21-22 apr | Finale: 23 mag
+  // Quarti: 3-5 feb 2026 | SF: 21-22 apr | Finale: 23 mag
   if(slug==='ger.dfb_pokal'){
-    if(inRange(2025,8,15,2025,8,19))  return 'Primo Turno';
+    if(inRange(2025,8,14,2025,8,19))  return 'Primo Turno';
     if(inRange(2025,10,27,2025,10,30))return 'Secondo Turno';
     if(inRange(2025,12,1,2025,12,5))  return 'Ottavi di Finale';
-    if(inRange(2026,2,3,2026,2,5))    return 'Quarti di Finale';
-    if(inRange(2026,4,21,2026,4,23))  return 'Semifinale';
+    if(inRange(2026,2,3,2026,2,6))    return 'Quarti di Finale';
+    if(inRange(2026,4,20,2026,4,23))  return 'Semifinale';
     if(inRange(2026,5,22,2026,5,24))  return 'Finale';
     return '';
   }
 
   // ── COUPE DE FRANCE 2025/26 ──────────────────────────────────────────────
-  // Fonte: fr.wikipedia.org/wiki/Coupe_de_France_de_football_2025-2026
-  // Turni Reg: ago-nov | 32esimi: 13-14 dic | 16esimi: 17-18 gen
-  // Ottavi: 7-8 feb | Quarti: 7-8 mar | SF: 22 apr | Finale: 23 mag
+  // Fonte: fr.wikipedia.org/wiki/Coupe_de_France_2025-2026 (FFF)
+  // Turni Regionali: ago-nov 2025 | 32esimi: 13-14 dic | 16esimi: 17-18 gen
+  // Ottavi: 7-8 feb | Quarti: 7-9 mar | SF: 22 apr | Finale: 23 mag
   if(slug==='fra.coupe_de_france'){
     if(inRange(2025,8,1,2025,11,30))  return 'Turni Regionali';
     if(inRange(2025,12,12,2025,12,15))return 'Trentaduesimi di Finale';
     if(inRange(2026,1,16,2026,1,19))  return 'Sedicesimi di Finale';
     if(inRange(2026,2,6,2026,2,9))    return 'Ottavi di Finale';
-    if(inRange(2026,3,6,2026,3,9))    return 'Quarti di Finale';
+    if(inRange(2026,3,6,2026,3,10))   return 'Quarti di Finale';
     if(inRange(2026,4,21,2026,4,23))  return 'Semifinale';
     if(inRange(2026,5,22,2026,5,24))  return 'Finale';
     return '';
   }
 
-  // ── SUPERCOPPE ────────────────────────────────────────────────────────────
-  if(slug==='ita.super_cup'||slug==='esp.super_cup'||slug==='uefa.super_cup'){
+  // ── SUPERCOPPE (gara unica) ───────────────────────────────────────────────
+  if(['ita.super_cup','esp.super_cup','uefa.super_cup'].includes(slug)){
     return 'Partita';
   }
 
   return '';
 }
+
 
 
 // ── HEALTH ────────────────────────────────────────────────────────────────────
@@ -1678,19 +1700,23 @@ app.get('/sport/basketball/standings/all',async(req,res)=>{
 // ── TABELLONE COPPE (partite per fase) ────────────────────────────────────────
 const CUP_LEAGUES=[
   // Coppe europee
-  {slug:'uefa.champions',   name:'Champions League',    fd:'CL',   group:'Europa'},
-  {slug:'uefa.europa',      name:'Europa League',       fd:'EL',   group:'Europa'},
-  {slug:'uefa.conference',  name:'Conference League',   fd:null,   sdbLeague:'4480', group:'Europa'},
-  {slug:'uefa.super_cup',   name:'UEFA Super Cup',      fd:null,   group:'Europa'},
+  {slug:'uefa.champions',     name:'Champions League',       fd:'CL',  group:'Europa'},
+  {slug:'uefa.europa',        name:'Europa League',          fd:'EL',  group:'Europa'},
+  {slug:'uefa.conference',    name:'Conference League',      fd:null,  group:'Europa'},
+  {slug:'uefa.super_cup',     name:'UEFA Super Cup',         fd:null,  group:'Europa'},
   // Coppe italiane
-  {slug:'ita.coppa_italia', name:'Coppa Italia',        fd:null,   group:'Italia'},
-  {slug:'ita.super_cup',    name:'Supercoppa Italiana', fd:null,   group:'Italia'},
-  // Coppe straniere
-  {slug:'esp.copa_del_rey', name:'Copa del Rey',        fd:null,   group:'Estero'},
-  {slug:'esp.super_cup',    name:'Supercoppa Spagnola', fd:null,   group:'Estero'},
-  {slug:'eng.fa',           name:'FA Cup',              fd:'FAC',  group:'Estero'},
-  {slug:'ger.dfb_pokal',    name:'DFB Pokal',           fd:'DFB',  group:'Estero'},
-  {slug:'fra.coupe_de_france',name:'Coupe de France',   fd:'CDF',  group:'Estero'},
+  {slug:'ita.coppa_italia',   name:'Coppa Italia',           fd:null,  group:'Italia'},
+  {slug:'ita.super_cup',      name:'Supercoppa Italiana',    fd:null,  group:'Italia'},
+  // Spagna
+  {slug:'esp.copa_del_rey',   name:'Copa del Rey',           fd:null,  group:'Spagna'},
+  {slug:'esp.super_cup',      name:'Supercoppa Spagnola',    fd:null,  group:'Spagna'},
+  // Inghilterra — FA Cup + EFL Cup (Carabao Cup)
+  {slug:'eng.fa',             name:'FA Cup',                 fd:'FAC', group:'Inghilterra'},
+  {slug:'eng.league_cup',     name:'EFL Cup (Carabao Cup)',  fd:null,  group:'Inghilterra'},
+  // Germania
+  {slug:'ger.dfb_pokal',      name:'DFB Pokal',              fd:'DFB', group:'Germania'},
+  // Francia
+  {slug:'fra.coupe_de_france',name:'Coupe de France',        fd:'CDF', group:'Francia'},
 ];
 
 
@@ -1753,39 +1779,59 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           }
         }catch{}
       }
-      // TheSportsDB fallback per Conference League (FD non supporta ECSL free tier)
-      if(lg.sdbLeague&&events.length===0){
-        try{
-          const yr=new Date().getFullYear();
-          const season=`${yr-1}-${yr}`;
-          const d=await sdb(`/eventsseason.php?id=${lg.sdbLeague}&s=${season}`,7200000).catch(()=>null);
-          for(const e of(d?.events||[])){
-            const eid=`sdb:${e.idEvent}`;if(seen.has(eid))continue;seen.add(eid);
-            const hs=e.intHomeScore,as=e.intAwayScore;
-            // Mappa round SDB → fase italiana
-            let round='';
-            const rd=(e.strRound||'').toLowerCase();
-            if(rd.includes('final')&&!rd.includes('semi')&&!rd.includes('quarter'))round='Finale';
-            else if(rd.includes('semi'))round='Semifinale';
-            else if(rd.includes('quarter'))round='Quarti di Finale';
-            else if(rd.includes('round of 16')||rd.includes('last 16'))round='Ottavi di Finale';
-            else if(rd.includes('round of 32')||rd.includes('last 32'))round='Sedicesimi di Finale';
-            else if(rd.includes('group')||rd.includes('league phase'))round='Fase a Gironi';
-            else if(rd.includes('playoff'))round='Playoff';
-            else if(rd.includes('qualifying'))round='Qualificazioni';
-            else if(e.strRound)round=`Giornata ${e.strRound}`;
-            // Se round ancora vuoto, classifica per data
-            if(!round) round=mapPhaseByDate(e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',lg.slug);
-            events.push({
-              id:eid,date:e.dateEvent?(e.dateEvent+'T'+(e.strTime||'00:00:00')):'',
-              league:lg.name,leagueSlug:lg.slug,
-              homeName:e.strHomeTeam||'',awayName:e.strAwayTeam||'',
-              homeScore:hs!=null?String(hs):'',awayScore:as!=null?String(as):'',
-              homeId:'',awayId:'',completed:hs!=null,live:false,clock:'',
-              round,statusDetail:'',
-            });
-          }
-        }catch{}
+      // Conference League: fetch per ogni giornata specifica (date UEFA ufficiali 2025/26)
+      if(lg.slug==='uefa.conference'&&events.length<50){
+        const ueclRanges=[
+          '20250710-20250718',  // Q1
+          '20250724-20250801',  // Q2
+          '20250807-20250815',  // Q3
+          '20250820-20250829',  // Play-off
+          '20250923-20250927',  // MD1 (25 set)
+          '20251021-20251025',  // MD2 (23 ott)
+          '20251104-20251108',  // MD3 (6 nov)
+          '20251125-20251129',  // MD4 (27 nov)
+          '20251209-20251213',  // MD5 (11 dic)
+          '20251216-20251220',  // MD6 (18 dic)
+          '20260217-20260228',  // Spareggio
+          '20260310-20260321',  // 16esimi
+          '20260407-20260418',  // Quarti
+          '20260428-20260509',  // Semifinali
+          '20260524-20260529',  // Finale (27 mag Lipsia)
+        ];
+        for(const range of ueclRanges){
+          try{
+            const d=await fetch(`${ESPN}/soccer/uefa.conference/scoreboard?dates=${range}`,7200000);
+            for(const e of(d?.events||[])){
+              const ne=normEvent(e,lg.name,lg.slug);
+              if(!ne||seen.has(ne.id))continue;
+              ne.round=mapPhaseByDate(ne.date,lg.slug)||ne.round||'';
+              seen.add(ne.id);events.push(ne);
+            }
+          }catch{}
+        }
+        // Fallback FD ECSL se ESPN restituisce troppo poco
+        if(events.length<20){
+          try{
+            const yr=new Date().getFullYear();
+            for(const season of[yr-1,yr-2]){
+              const fd_d=await fd(`/competitions/ECSL/matches?season=${season}`,7200000).catch(()=>null);
+              if(!fd_d?.matches?.length) continue;
+              for(const m of fd_d.matches){
+                const eid=`fd:${m.id}`;if(seen.has(eid))continue;seen.add(eid);
+                events.push({
+                  id:eid,date:m.utcDate||'',league:lg.name,leagueSlug:lg.slug,
+                  homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
+                  awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
+                  homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
+                  awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
+                  homeId:'',awayId:'',completed:m.status==='FINISHED',live:false,
+                  clock:'',round:mapStage(m.stage||m.group||''),statusDetail:'',
+                });
+              }
+              if(events.length>20) break;
+            }
+          }catch{}
+        }
       }
       // football-data fallback: CL/EL usano FD per fasi corrette, Conference non disponibile su FD free
       const isCoppaEuropea=lg.slug==='uefa.champions'||lg.slug==='uefa.europa'||lg.slug==='uefa.conference';
