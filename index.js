@@ -1908,7 +1908,6 @@ app.get('/sport/soccer/cups',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-);
 
 const PORT=process.env.PORT||10000;
 // ══════════════════════════════════════════════════════════════════════════════
