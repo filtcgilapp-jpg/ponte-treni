@@ -1753,262 +1753,162 @@ async function getWikiPhasesForCup(slug){
 
 app.get('/sport/soccer/cups',async(req,res)=>{
   try{
-    // Stagione 2025/26: tre chunk da 90 giorni (ESPN max ~90gg per range)
-    const now=new Date();
-    const yyyymmdd=d=>d.toISOString().slice(0,10).replace(/-/g,'');
-    const ranges=[
-      '20250701-20250930',  // UECL qualificazioni luglio-settembre
-      '20251001-20260131',  // Coppe nazionali turni + fase campionato europea
-      '20260201-20260430',  // Spareggi, ottavi, quarti, semifinali
-      '20260501-20260630',  // Finali (tutte in maggio-giugno)
+    // Range stagione 2025/26 — divisi in 4 blocchi trimestrali
+    const seasonRanges=[
+      '20250701-20251001',
+      '20251001-20260101',
+      '20260101-20260401',
+      '20260401-20260701',
     ];
+
+    // Range specifici per Conference League (giornate esatte UEFA)
+    const ueclRanges=[
+      '20250710-20250718','20250724-20250801','20250807-20250815','20250820-20250829',
+      '20250923-20250927','20251021-20251025','20251104-20251108',
+      '20251125-20251129','20251209-20251213','20251216-20251220',
+      '20260217-20260228','20260310-20260321','20260407-20260418',
+      '20260428-20260509','20260524-20260529',
+    ];
+
     const results=[];
+
     for(const lg of CUP_LEAGUES){
-      const events=[];const seen=new Set();
-      for(const dateRange of ranges){
+      const events=[];
+      const seen=new Set();
+
+      // ── Fetch partite ──────────────────────────────────────────────────
+      const rangesToUse = lg.slug==='uefa.conference' ? ueclRanges : seasonRanges;
+
+      for(const range of rangesToUse){
         try{
-          const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${dateRange}`,7200000);
-          const rawEvs=d?.events||[];
-          for(const e of rawEvs){
+          const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${range}`,7200000);
+          for(const e of(d?.events||[])){
             const ne=normEvent(e,lg.name,lg.slug);
-            if(!ne||seen.has(ne.id))continue;
-            const comp=(e.competitions||[])[0]||{};
-            const hl=comp.notes?.[0]?.headline||comp.type?.text||'';
-            ne.round=hl?mapPhaseESPN(hl):'';
-            seen.add(ne.id);events.push(ne);
+            if(!ne||seen.has(ne.id)) continue;
+            seen.add(ne.id);
+            events.push(ne);
           }
         }catch{}
       }
-      // Conference League: fetch per ogni giornata specifica (date UEFA ufficiali 2025/26)
-      if(lg.slug==='uefa.conference'&&events.length<50){
-        const ueclRanges=[
-          '20250710-20250718',  // Q1
-          '20250724-20250801',  // Q2
-          '20250807-20250815',  // Q3
-          '20250820-20250829',  // Play-off
-          '20250923-20250927',  // MD1 (25 set)
-          '20251021-20251025',  // MD2 (23 ott)
-          '20251104-20251108',  // MD3 (6 nov)
-          '20251125-20251129',  // MD4 (27 nov)
-          '20251209-20251213',  // MD5 (11 dic)
-          '20251216-20251220',  // MD6 (18 dic)
-          '20260217-20260228',  // Spareggio
-          '20260310-20260321',  // 16esimi
-          '20260407-20260418',  // Quarti
-          '20260428-20260509',  // Semifinali
-          '20260524-20260529',  // Finale (27 mag Lipsia)
-        ];
-        for(const range of ueclRanges){
-          try{
-            const d=await fetch(`${ESPN}/soccer/uefa.conference/scoreboard?dates=${range}`,7200000);
-            for(const e of(d?.events||[])){
-              const ne=normEvent(e,lg.name,lg.slug);
-              if(!ne||seen.has(ne.id))continue;
-              ne.round=mapPhaseByDate(ne.date,lg.slug)||ne.round||'';
-              seen.add(ne.id);events.push(ne);
-            }
-          }catch{}
-        }
-        // Fallback FD ECSL se ESPN restituisce troppo poco
-        if(events.length<20){
-          try{
-            const yr=new Date().getFullYear();
-            for(const season of[yr-1,yr-2]){
-              const fd_d=await fd(`/competitions/ECSL/matches?season=${season}`,7200000).catch(()=>null);
-              if(!fd_d?.matches?.length) continue;
-              for(const m of fd_d.matches){
-                const eid=`fd:${m.id}`;if(seen.has(eid))continue;seen.add(eid);
-                events.push({
-                  id:eid,date:m.utcDate||'',league:lg.name,leagueSlug:lg.slug,
-                  homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
-                  awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
-                  homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
-                  awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
-                  homeId:'',awayId:'',completed:m.status==='FINISHED',live:false,
-                  clock:'',round:mapStage(m.stage||m.group||''),statusDetail:'',
-                });
-              }
-              if(events.length>20) break;
-            }
-          }catch{}
-        }
-      }
-      // football-data fallback: CL/EL usano FD per fasi corrette, Conference non disponibile su FD free
-      const isCoppaEuropea=lg.slug==='uefa.champions'||lg.slug==='uefa.europa'||lg.slug==='uefa.conference';
-      const isCoppaNazionale=!isCoppaEuropea&&lg.isCup;
-      if(lg.fd&&lg.slug!=='uefa.conference'&&events.length>0){
-        // Arricchisci sempre da FD per CL/EL: stage ufficiali
+
+      // ── Fallback FD per CL/EL (stage ufficiali) ───────────────────────
+      if((lg.slug==='uefa.champions'||lg.slug==='uefa.europa')&&lg.fd&&events.length>0){
         try{
           const yr=new Date().getFullYear();
           let fdData=await fd(`/competitions/${lg.fd}/matches?season=${yr-1}`,7200000).catch(()=>null);
           if(!fdData?.matches?.length) fdData=await fd(`/competitions/${lg.fd}/matches?season=${yr-2}`,7200000).catch(()=>null);
           if(fdData?.matches?.length){
-            // Mappa: data → stage (più precisa di nome squadra)
-            const fdDateMap=new Map();
-            const fdTeamMap=new Map();
-            for(const m of(fdData.matches||[])){
-              const ht=m.homeTeam?.shortName||m.homeTeam?.name||'';
-              const at=m.awayTeam?.shortName||m.awayTeam?.name||'';
-              const stage=mapStage(m.stage||m.group||'');
-              if(m.utcDate){
-                const dk=m.utcDate.slice(0,10);
-                fdDateMap.set(dk,stage);
-              }
-              if(ht&&at) fdTeamMap.set(`${ht}|${at}`,stage);
-            }
-            // Build anche una mappa per data → stage (molte partite stessa data = stessa fase)
+            // Costruisci mappa data→stage da FD
             const fdDateStage=new Map();
-            for(const[dk,stage] of fdDateMap){
-              if(!fdDateStage.has(dk)) fdDateStage.set(dk,stage);
+            for(const m of fdData.matches){
+              const dk=(m.utcDate||'').slice(0,10);
+              const stage=mapStage(m.stage||m.group||'');
+              if(dk&&stage&&!fdDateStage.has(dk)) fdDateStage.set(dk,stage);
             }
+            // Applica stage FD agli eventi ESPN dove manca o è generico
             for(const e of events){
               const dk=e.date?e.date.slice(0,10):'';
-              const teamKey=`${e.homeName}|${e.awayName}`;
-              let stageByTeam=fdTeamMap.get(teamKey)||'';
-              // Fallback: cerca match parziale sul nome squadra
-              if(!stageByTeam){
-                for(const[k,v] of fdTeamMap){
-                  const [ht,at]=k.split('|');
-                  if((e.homeName&&(e.homeName.includes(ht)||ht.includes(e.homeName)))&&
-                     (e.awayName&&(e.awayName.includes(at)||at.includes(e.awayName)))){
-                    stageByTeam=v; break;
-                  }
-                }
-              }
-              const stageByDate=fdDateStage.get(dk)||'';
-              const isGeneric=!e.round||e.round===''||
-                e.round==='Champions League'||e.round==='Europa League'||
-                e.round==='Conference League'||e.round==='Fase Knockout'||
-                e.round==='Fase a Eliminazione'||e.round==='Altra Fase'||
-                e.round==='Partite';
-              if(isGeneric||(stageByTeam&&stageByTeam!==e.round)){
-                e.round=stageByTeam||stageByDate||e.round||'';
-              }
-              // Fallback finale: classifica per data se ancora vuoto o generico
-              if(!e.round||e.round==='Partite'||e.round==='Fase Knockout'){
-                e.round=mapPhaseByDate(e.date,lg.slug);
-              }
-              // Override data-driven: per coppe europee forza fase da calendario ufficiale per-slug
-              if(isCoppaEuropea&&e.date){
-                e.round=mapPhaseByDate(e.date,lg.slug);
-              }
+              const fdStage=fdDateStage.get(dk)||'';
+              if(fdStage) e.round=fdStage;
             }
           }
         }catch{}
       }
-      // Passaggio finale: forza fase corretta per-slug su tutte le coppe
-      // Passaggio finale: mapPhaseByDate è la fonte autoritativa per tutte le coppe
-      for(const e of events){
-        if(!e.date) continue;
-        const ph=mapPhaseByDate(e.date,lg.slug);
-        if(ph){
-          // Se abbiamo una fase dal calendario ufficiale, usala sempre
-          e.round=ph;
-        } else if(!e.round||e.round==='Fase a Eliminazione'||e.round==='Fase Knockout'||
-                  e.round==='Altra Fase'||e.round==='Partite'||e.round===''){
-          // Nessuna fase da calendario e round generico: lascia quello di ESPN se specifico
-          // altrimenti assegna "Partite" come fallback
-          if(!e.round) e.round='Partite';
-        }
-      }
-      if(events.length===0)continue;
-      events.sort((a,b)=>new Date(a.date)-new Date(b.date));
-      // Per coppe nazionali senza round: stima fase dal numero partite rimaste
-      // (più partite = turno iniziale, meno = finale)
-      if(isCoppaNazionale){
-        // Fallback per fasi non coperte da mapPhaseByDate: stima da conteggio partite
-        const dateGroups=new Map();
-        for(const e of events){
-          const wk=e.date?e.date.slice(0,7):'';
-          if(!dateGroups.has(wk))dateGroups.set(wk,[]);
-          dateGroups.get(wk).push(e);
-        }
-        const sortedWks=[...dateGroups.keys()].sort();
-        sortedWks.forEach((wk)=>{
-          const grpEvs=dateGroups.get(wk);
-          // Solo gli eventi senza round assegnato da mapPhaseByDate
-          const missing=grpEvs.filter(e=>!e.round||e.round==='Partite');
-          if(missing.length===0) return;
-          const cnt=grpEvs.length;
-          let phase='';
-          const existingRound=grpEvs.find(e=>e.round&&e.round!=='Partite')?.round;
-          if(existingRound){ phase=existingRound; }
-          else if(cnt>=32) phase='Turno Preliminare';
-          else if(cnt>=16) phase='Sedicesimi di Finale';
-          else if(cnt>=8) phase='Ottavi di Finale';
-          else if(cnt>=4) phase='Quarti di Finale';
-          else if(cnt>=2) phase='Semifinale';
-          else if(cnt===1) phase='Finale';
-          else phase='Turno';
-          for(const e of missing) e.round=phase;
-        });
+
+      // ── Fallback FD per UECL ──────────────────────────────────────────
+      if(lg.slug==='uefa.conference'&&events.length<20){
+        try{
+          const yr=new Date().getFullYear();
+          for(const season of[yr-1,yr-2]){
+            const fdData=await fd(`/competitions/ECSL/matches?season=${season}`,7200000).catch(()=>null);
+            if(!fdData?.matches?.length) continue;
+            for(const m of fdData.matches){
+              const eid=`fd:${m.id}`;if(seen.has(eid))continue;seen.add(eid);
+              events.push({
+                id:eid,date:m.utcDate||'',league:lg.name,leagueSlug:lg.slug,
+                homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
+                awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
+                homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
+                awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
+                homeId:'',awayId:'',completed:m.status==='FINISHED',live:false,
+                clock:'',round:mapStage(m.stage||m.group||''),statusDetail:'',
+              });
+            }
+            if(events.length>20) break;
+          }
+        }catch{}
       }
 
+      if(events.length===0) continue;
+
+      // ── Assegna fase a ogni partita ────────────────────────────────────
+      // Regola UNICA: mapPhaseByDate è la fonte autoritativa.
+      // Se non restituisce nulla, mantieni il round ESPN se è specifico,
+      // altrimenti usa 'Partite' come fallback.
+      const genericRounds=new Set(['','Partite','Fase Knockout','Fase a Eliminazione',
+        'Altra Fase','Champions League','Europa League','Conference League',
+        'Coppa Italia','FA Cup','DFB Pokal','Coupe de France','Copa del Rey']);
+
+      events.sort((a,b)=>new Date(a.date)-new Date(b.date));
+
+      for(const e of events){
+        const ph=mapPhaseByDate(e.date,lg.slug);
+        if(ph){
+          e.round=ph;
+        } else if(genericRounds.has(e.round||'')){
+          e.round='Partite';
+        }
+        // Se ESPN manda "X advance N-M on penalties" → dcr
+        if((e.round||'').match(/advance|on penalties/i)){
+          if(!e.statusDetail||e.statusDetail==='FT') e.statusDetail='dcr';
+          const ph2=mapPhaseByDate(e.date,lg.slug);
+          e.round=ph2||'Partite';
+        }
+      }
+
+      // ── Raggruppa per fase ─────────────────────────────────────────────
       const phaseMap=new Map();
       for(const e of events){
-        // Normalizza round: se ESPN usa "X advance N-M on penalties" → assegna a fase appropriata
-        // e aggiungi info rigori allo statusDetail
-        let ph=e.round||'';
-        const penMatch=ph.match(/(.+?)(?:\s+(?:advance|win)\s+[\d-]+\s+on\s+penalties)/i);
-        if(penMatch){
-          if(!e.statusDetail||e.statusDetail==='FT') e.statusDetail='dcr';
-          ph=''; // verrà assegnata alla fase corretta dopo
-        }
-        ph=ph||'Partite';
-        if(!phaseMap.has(ph))phaseMap.set(ph,[]);
+        const ph=e.round||'Partite';
+        if(!phaseMap.has(ph)) phaseMap.set(ph,[]);
         phaseMap.get(ph).push(e);
       }
-      // Ordine fasi: copre tutte le coppe con l'ordine cronologico corretto
-      // Coppa Italia: Prelim → 32esimi → 16esimi → Ottavi → Quarti → SF → Finale
-      // Copa del Rey: Prelim → 1T → 32esimi → 16esimi → Quarti → SF → Finale
-      // FA Cup: Qualif → 1T → 2T → 3T → 4T → 5T → Quarti → SF → Finale
-      // DFB Pokal: 1T → 2T → Ottavi → Quarti → SF → Finale
-      // Coupe de France: Regionali → 32esimi → 16esimi → Ottavi → Quarti → SF → Finale
-      // Conference: Q1 → Q2 → Q3 → PO → Fase Camp. → Spareggio → 16esimi → Quarti → SF → Finale
+
+      // Ordine cronologico fasi
       const phaseOrder=[
-        // Qualificazioni (UECL e FA Cup)
-        'Turni Regionali',
-        'Turni di Qualificazione',
-        'Primo Turno Qualificazione',
-        'Secondo Turno Qualificazione',
-        'Terzo Turno Qualificazione',
-        'Play-off Qualificazione',
-        // Turni iniziali coppe nazionali
-        'Turno Preliminare',
-        'Primo Turno',
-        'Secondo Turno',
-        'Trentaduesimi di Finale',
-        // Fase a gironi / campionato (europee)
-        'Fase a Gironi',
-        'Fase Leghe',
-        'Fase Campionato',
-        // Spareggi e playoff europei
-        'Spareggio',
-        'Playoff',
-        // Fasi ad eliminazione diretta
-        'Sedicesimi di Finale',
-        'Terzo Turno',
-        'Ottavi di Finale',
-        'Quarto Turno',
-        'Quarti di Finale',
-        'Quinto Turno',
-        'Semifinale',
-        'Finale',
-        // Fallback
-        'Fase a Eliminazione',
-        'Fase Knockout',
-        'Altra Fase',
-        'Partite',
+        'Primo Turno Qualificazione','Secondo Turno Qualificazione','Terzo Turno Qualificazione',
+        'Play-off Qualificazione','Turni di Qualificazione','Turni Regionali',
+        'Turno Preliminare','Primo Turno','Secondo Turno',
+        'Trentaduesimi di Finale','Terzo Turno',
+        'Fase a Gironi','Fase Leghe','Fase Campionato',
+        'Spareggio','Playoff',
+        'Sedicesimi di Finale','Quarto Turno','Ottavi di Finale',
+        'Quinto Turno','Quarti di Finale',
+        'Semifinale','Finale','Partita','Partite',
       ];
+
       const phases=[...phaseMap.entries()]
-        .sort((a,b)=>{const ai=phaseOrder.indexOf(a[0]),bi=phaseOrder.indexOf(b[0]);
-          return ai>=0&&bi>=0?ai-bi:ai>=0?-1:bi>=0?1:0;})
+        .sort((a,b)=>{
+          const ai=phaseOrder.indexOf(a[0]);
+          const bi=phaseOrder.indexOf(b[0]);
+          if(ai>=0&&bi>=0) return ai-bi;
+          if(ai>=0) return -1;
+          if(bi>=0) return 1;
+          // Fallback: ordina per data prima partita
+          const da=new Date(a[1][0]?.date||'2099');
+          const db=new Date(b[1][0]?.date||'2099');
+          return da-db;
+        })
         .map(([name,evs])=>({name,events:evs}));
+
       results.push({slug:lg.slug,name:lg.name,group:lg.group,phases,totalEvents:events.length});
     }
+
     res.json({cups:results});
   }catch(e){res.status(500).json({error:e.message});}
 });
+
+);
 
 const PORT=process.env.PORT||10000;
 // ══════════════════════════════════════════════════════════════════════════════
