@@ -1066,17 +1066,15 @@ app.get('/sport/f1/calendar',async(req,res)=>{
     }catch{}
     // Fallback hardcoded se Jolpica vuoto
     if(races.length===0) races=F1_2026.map(r=>({...r}));
-    // Risultati ultima gara passata (1 chiamata Jolpica)
+    // Risultati per tutte le gare passate (in parallelo, top 3)
     const past=races.filter(r=>new Date(r.date)<now);
-    if(past.length>0){
-      const last=past[past.length-1];
-      if(!last.Results){
-        try{
-          const r=await ergast(`/${F1Y}/${last.round}/results`);
-          last.Results=(r?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,3);
-        }catch{}
-      }
-    }
+    await Promise.all(past.map(async race=>{
+      if(race.Results&&race.Results.length>0) return; // già presenti
+      try{
+        const r=await ergast(`/${F1Y}/${race.round}/results`,300000);
+        race.Results=(r?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,3);
+      }catch{}
+    }));
     res.json({MRData:{RaceTable:{Races:races}}});
   }catch(e){res.status(500).json({error:e.message});}
 });
@@ -1908,6 +1906,24 @@ app.get('/sport/soccer/cups',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+
+// ── F1 Risultati gara singola (top 10) ───────────────────────────────────────
+app.get('/sport/f1/race/:round/results',async(req,res)=>{
+  try{
+    const round=req.params.round;
+    const d=await ergast(`/${F1Y}/${round}/results`,300000);
+    const results=(d?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,10).map(r=>({
+      position:r.position,
+      driver:`${r.Driver?.givenName||''} ${r.Driver?.familyName||''}`.trim(),
+      familyName:r.Driver?.familyName||'',
+      constructor:r.Constructor?.name||'',
+      points:r.points||'0',
+      time:r.Time?.time||r.status||'',
+      grid:r.grid||'',
+    }));
+    res.json({results,raceName:d?.MRData?.RaceTable?.Races?.[0]?.raceName||''});
+  }catch(e){res.status(500).json({error:e.message});}
+});
 
 const PORT=process.env.PORT||10000;
 // ══════════════════════════════════════════════════════════════════════════════
