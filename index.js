@@ -1925,6 +1925,114 @@ app.get('/sport/f1/race/:round/results',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// TABELLONE STAZIONE — cerca stazione + partenze + arrivi (ViaggiatrEno)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Cerca stazione per nome — restituisce lista con id e nome
+app.get('/stazione/cerca',async(req,res)=>{
+  const q=(req.query.q||'').trim();
+  if(q.length<2) return res.json({stazioni:[]});
+  try{
+    let data='';
+    try{
+      const r=await axios.get(`${VT}/cercaStazioneAC/${encodeURIComponent(q)}`,
+        {headers:VT_H,timeout:10000,responseType:'text'});
+      data=(r.data||'').toString().trim();
+    }catch{
+      const r=await axios.get(`${VT2}/cercaStazioneAC/${encodeURIComponent(q)}`,
+        {headers:VT_H,timeout:10000,responseType:'text'});
+      data=(r.data||'').toString().trim();
+    }
+    // Risposta: JSON array [{nomeLungo:"MILANO CENTRALE", id:"S01700"}, ...]
+    let stazioni=[];
+    try{ stazioni=JSON.parse(data); }catch{
+      // Fallback: formato testo "Nome|ID\n..."
+      stazioni=data.split('\n').filter(Boolean).map(line=>{
+        const parts=line.split('|');
+        return parts.length>=2?{nomeLungo:parts[0].trim(),id:parts[1].trim()}:null;
+      }).filter(Boolean);
+    }
+    res.json({stazioni:Array.isArray(stazioni)?stazioni.slice(0,10):[]});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// Partenze stazione
+app.get('/stazione/:id/partenze',async(req,res)=>{
+  try{
+    const id=req.params.id;
+    const now=Date.now();
+    let data=null;
+    // Prova VT poi VT2
+    for(const base of[VT,VT2]){
+      try{
+        const r=await axios.get(`${base}/partenze/${id}/${now}`,
+          {headers:VT_H,timeout:12000});
+        if(r.data&&Array.isArray(r.data)){data=r.data;break;}
+        if(r.data&&typeof r.data==='string'){
+          try{data=JSON.parse(r.data);break;}catch{}
+        }
+      }catch{}
+    }
+    if(!data||!Array.isArray(data)) return res.json({partenze:[]});
+    const partenze=data.slice(0,30).map(t=>({
+      numero:t.compNumeroTreno||t.numeroTreno||'',
+      categoria:t.categoria||'',
+      destinazione:(t.destinazione||'').toUpperCase(),
+      orario:t.compOrarioPartenza||_fmtOrario(t.orarioPartenza),
+      ritardo:t.ritardo||0,
+      binarioProgrammato:t.binarioProgrammatoPartenzaDescrizione||'',
+      binarioEffettivo:t.binarioEffettivoPartenzaDescrizione||'',
+      inStazione:!!t.inStazione,
+      nonPartito:!!t.nonPartito,
+      cancelled:!!(t.provvedimento===1||t.tipoTreno==='CANC'),
+    }));
+    res.json({partenze});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// Arrivi stazione
+app.get('/stazione/:id/arrivi',async(req,res)=>{
+  try{
+    const id=req.params.id;
+    const now=Date.now();
+    let data=null;
+    for(const base of[VT,VT2]){
+      try{
+        const r=await axios.get(`${base}/arrivi/${id}/${now}`,
+          {headers:VT_H,timeout:12000});
+        if(r.data&&Array.isArray(r.data)){data=r.data;break;}
+        if(r.data&&typeof r.data==='string'){
+          try{data=JSON.parse(r.data);break;}catch{}
+        }
+      }catch{}
+    }
+    if(!data||!Array.isArray(data)) return res.json({arrivi:[]});
+    const arrivi=data.slice(0,30).map(t=>({
+      numero:t.compNumeroTreno||t.numeroTreno||'',
+      categoria:t.categoria||'',
+      origine:(t.origine||'').toUpperCase(),
+      orario:t.compOrarioArrivo||_fmtOrario(t.orarioArrivo),
+      ritardo:t.ritardo||0,
+      binarioProgrammato:t.binarioProgrammatoArrivoDescrizione||'',
+      binarioEffettivo:t.binarioEffettivoArrivoDescrizione||'',
+      inStazione:!!t.inStazione,
+      cancelled:!!(t.provvedimento===1||t.tipoTreno==='CANC'),
+    }));
+    res.json({arrivi});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+// Helper orario: converti timestamp ms → "HH:MM"
+function _fmtOrario(ts){
+  if(!ts) return '';
+  try{
+    const d=new Date(ts);
+    return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
+  }catch{return '';}
+}
+
+
 const PORT=process.env.PORT||10000;
 // ══════════════════════════════════════════════════════════════════════════════
 // MONDIALI 2026 — USA/Canada/Messico, 11 giu – 19 lug 2026
