@@ -1984,18 +1984,21 @@ app.get('/stazione/:id/partenze',async(req,res)=>{
     const id=req.params.id;
     const now=Date.now();
     let data=null;
-    // Prova VT poi VT2
+    let lastRaw='';
     for(const base of[VT,VT2]){
       try{
         const r=await axios.get(`${base}/partenze/${id}/${now}`,
-          {headers:VT_H,timeout:12000});
-        if(r.data&&Array.isArray(r.data)){data=r.data;break;}
-        if(r.data&&typeof r.data==='string'){
-          try{data=JSON.parse(r.data);break;}catch{}
-        }
+          {headers:VT_H,timeout:12000,responseType:'text'});
+        const raw=(r.data||'').toString().trim();
+        lastRaw=raw.slice(0,100);
+        if(!raw||raw.startsWith('<')||raw.startsWith('function')) continue;
+        try{ const j=JSON.parse(raw); if(Array.isArray(j)){data=j;break;} }catch{}
+        // Se l'array arriva come stringa vuota o null
+        if(raw==='null'||raw==='[]') {data=[];break;}
       }catch{}
     }
-    if(!data||!Array.isArray(data)) return res.json({partenze:[]});
+    if(!data) return res.json({partenze:[],debug:lastRaw});
+    if(data.length===0) return res.json({partenze:[],debug:'array vuoto'});
     const partenze=data.slice(0,30).map(t=>({
       numero:t.compNumeroTreno||t.numeroTreno||'',
       categoria:t.categoria||'',
@@ -2018,17 +2021,20 @@ app.get('/stazione/:id/arrivi',async(req,res)=>{
     const id=req.params.id;
     const now=Date.now();
     let data=null;
+    let lastRaw='';
     for(const base of[VT,VT2]){
       try{
         const r=await axios.get(`${base}/arrivi/${id}/${now}`,
-          {headers:VT_H,timeout:12000});
-        if(r.data&&Array.isArray(r.data)){data=r.data;break;}
-        if(r.data&&typeof r.data==='string'){
-          try{data=JSON.parse(r.data);break;}catch{}
-        }
+          {headers:VT_H,timeout:12000,responseType:'text'});
+        const raw=(r.data||'').toString().trim();
+        lastRaw=raw.slice(0,100);
+        if(!raw||raw.startsWith('<')||raw.startsWith('function')) continue;
+        try{ const j=JSON.parse(raw); if(Array.isArray(j)){data=j;break;} }catch{}
+        if(raw==='null'||raw==='[]') {data=[];break;}
       }catch{}
     }
-    if(!data||!Array.isArray(data)) return res.json({arrivi:[]});
+    if(!data) return res.json({arrivi:[],debug:lastRaw});
+    if(data.length===0) return res.json({arrivi:[],debug:'array vuoto'});
     const arrivi=data.slice(0,30).map(t=>({
       numero:t.compNumeroTreno||t.numeroTreno||'',
       categoria:t.categoria||'',
@@ -2053,6 +2059,31 @@ function _fmtOrario(ts){
   }catch{return '';}
 }
 
+
+// ── Diagnostica stazione (test diretto VT) ──────────────────────────────────
+app.get('/diag/stazione/:id',async(req,res)=>{
+  const id=req.params.id;
+  const now=Date.now();
+  const results={};
+  // Test 1: partenze con timestamp ms
+  for(const[label,base] of[['VT',VT],['VT2',VT2]]){
+    for(const[tlabel,ts] of[['ms',now],['sec',Math.floor(now/1000)]]){
+      try{
+        const url=`${base}/partenze/${id}/${ts}`;
+        const r=await axios.get(url,{headers:VT_H,timeout:8000,responseType:'text'});
+        const raw=(r.data||'').toString();
+        results[`${label}_partenze_${tlabel}`]={
+          status:r.status,
+          isArray:Array.isArray(r.data),
+          type:typeof r.data,
+          len:Array.isArray(r.data)?r.data.length:null,
+          preview:raw.slice(0,200),
+        };
+      }catch(e){results[`${label}_partenze_${tlabel}`]={error:e.message};}
+    }
+  }
+  res.json(results);
+});
 
 const PORT=process.env.PORT||10000;
 // ══════════════════════════════════════════════════════════════════════════════
