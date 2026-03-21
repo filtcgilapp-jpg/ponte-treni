@@ -2014,12 +2014,62 @@ app.get('/sport/soccer/cups',async(req,res)=>{
     const results=[];
 
     for(const cup of CUP_CALENDARS){
-      const allEvents=[]; const seen=new Set();
       const phaseNames=cup.phases.map(p=>p.name);
 
-      // ── 1. ESPN per ogni fase — chunk da 14 giorni ───────────────────
+      // Raccoglie eventi da tutte le fonti
+      // Deduplicazione per "data_homeNorm_awayNorm" — più affidabile degli ID
+      const byMatchKey=new Map(); // key→event
+      const seenId=new Set();
+
+      function addEvent(e, sourcePriority){
+        if(!e||!e.homeName||!e.awayName) return;
+        const dk=(e.date||'').slice(0,10);
+        const hk=e.homeName.toLowerCase().replace(/\s+/g,'').slice(0,6);
+        const ak=e.awayName.toLowerCase().replace(/\s+/g,'').slice(0,6);
+        const matchKey=`${dk}_${hk}_${ak}`;
+        const existing=byMatchKey.get(matchKey);
+        // Sostituisci se nuova fonte ha priorità maggiore o dati più completi
+        if(!existing || sourcePriority > (existing._prio||0) ||
+           (e.homeScore&&!existing.homeScore)){
+          e._prio=sourcePriority;
+          byMatchKey.set(matchKey,e);
+        }
+      }
+
+      // ── FONTE 1: Football-Data.org (priorità massima — dati ufficiali) ─
+      if(cup.fd){
+        try{
+          const yr=new Date().getFullYear();
+          let fdData=null;
+          for(const season of[yr-1,yr-2]){
+            fdData=await fd(`/competitions/${cup.fd}/matches?season=${season}&limit=200`,3600000).catch(()=>null);
+            if(fdData?.matches?.length) break;
+          }
+          if(fdData?.matches?.length){
+            for(const m of fdData.matches){
+              const mDate=(m.utcDate||'').replace(/-/g,'').slice(0,8);
+              const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
+              if(!phase) continue;
+              addEvent({
+                id:`fd:${m.id}`, date:m.utcDate||'', league:cup.name, leagueSlug:cup.slug,
+                homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
+                awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
+                homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
+                awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
+                homeId:'',awayId:'',
+                completed:['FINISHED','AWARDED'].includes(m.status),
+                live:m.status==='IN_PLAY', clock:'',
+                round:phase.name,
+                statusDetail:m.score?.duration==='PENALTY_SHOOTOUT'?'dcr':
+                             m.score?.duration==='EXTRA_TIME'?'dts':'',
+              }, 3); // priorità 3 = massima
+            }
+          }
+        }catch{}
+      }
+
+      // ── FONTE 2: ESPN per fase (chunk 14gg) ───────────────────────────
       for(const phase of cup.phases){
-        // Spezza il range in chunk da 14 giorni (limite pratico ESPN)
         const chunks=dateChunks(phase.from,phase.to,14);
         for(const [cfrom,cto] of chunks){
           try{
@@ -2028,114 +2078,41 @@ app.get('/sport/soccer/cups',async(req,res)=>{
               1800000);
             for(const e of(d?.events||[])){
               const ne=normEvent(e,cup.name,cup.slug);
-              if(!ne||seen.has(ne.id)) continue;
-              seen.add(ne.id); ne.round=phase.name;
-              allEvents.push(ne);
+              if(!ne) continue;
+              ne.round=phase.name;
+              addEvent(ne, 2); // priorità 2
             }
           }catch{}
         }
       }
 
-      // ── 2. FD per coppe con codice — include partite passate E future ──
-      if(cup.fd&&(cup.slug==='uefa.champions'||cup.slug==='uefa.europa'||
-         cup.slug==='eng.fa'||cup.slug==='ger.dfb_pokal'||cup.slug==='fra.coupe_de_france')){
-        try{
-          const yr=new Date().getFullYear();
-          // Prende tutti i match della stagione (passati + futuri) 
-          let fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-1}&limit=200`,3600000).catch(()=>null);
-          if(!fdData?.matches?.length) fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-1}`,3600000).catch(()=>null);
-          if(!fdData?.matches?.length) fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-2}`,3600000).catch(()=>null);
-          if(fdData?.matches?.length){
-            for(const m of fdData.matches){
-              const eid=`fd:${m.id}`;
-              // Non deduplichiamo contro ESPN: FD ha dati più completi
-              if(seen.has(eid)) continue;
-              const mDate=(m.utcDate||'').replace(/-/g,'').slice(0,8);
-              const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
-              if(!phase) continue;
-              seen.add(eid);
-              allEvents.push({
-                id:eid, date:m.utcDate||'', league:cup.name, leagueSlug:cup.slug,
-                homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
-                awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
-                homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
-                awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
-                homeId:'',awayId:'', completed:m.status==='FINISHED',
-                live:m.status==='IN_PLAY', clock:'', round:phase.name,
-                statusDetail:m.score?.duration==='PENALTY_SHOOTOUT'?'dcr':
-                             m.score?.duration==='EXTRA_TIME'?'dts':'',
-              });
-            }
-          }
-        }catch{}
-      }
-
-      // ── 3. FD per UECL e tutte le coppe europee senza partite ────────
-      if(cup.fd&&allEvents.length<5){
-        try{
-          const yr=new Date().getFullYear();
-          for(const season of[yr-1,yr-2]){
-            const fdData=await fd(`/competitions/${cup.fd}/matches?season=${season}`,3600000).catch(()=>null);
-            if(!fdData?.matches?.length) continue;
-            for(const m of fdData.matches){
-              const eid=`fd:${m.id}`;
-              // Non deduplichiamo contro ESPN: FD ha dati più completi
-              if(seen.has(eid)) continue;
-              const mDate=(m.utcDate||'').replace(/-/g,'').slice(0,8);
-              const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
-              if(!phase) continue;
-              seen.add(eid);
-              allEvents.push({
-                id:eid, date:m.utcDate||'', league:cup.name, leagueSlug:cup.slug,
-                homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
-                awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
-                homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
-                awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
-                homeId:'',awayId:'', completed:m.status==='FINISHED',
-                live:false, clock:'', round:phase.name,
-                statusDetail:m.score?.duration==='PENALTY_SHOOTOUT'?'dcr':'',
-              });
-            }
-            if(allEvents.length>5) break;
-          }
-        }catch{}
-      }
-
-      // ── 4. Wikipedia per coppe nazionali ──────────────────────────────
+      // ── FONTE 3: Wikipedia (integrazione partite mancanti) ────────────
       if(cup.wiki){
         try{
           const wikiEvs=await fetchWikiMatches(cup);
-          for(const e of wikiEvs){
-            if(seen.has(e.id)) continue;
-            seen.add(e.id);
-            allEvents.push(e);
-          }
+          for(const e of wikiEvs) addEvent(e, 1); // priorità 1 = minima
         }catch{}
       }
 
-      // ── Determina se mostrare la coppa ────────────────────────────────
+      const allEvents=[...byMatchKey.values()];
+
+      // Coppe europee: mostra anche se vuote
       const europee=new Set(['uefa.champions','uefa.europa','uefa.conference']);
       if(allEvents.length===0&&!europee.has(cup.slug)) continue;
-      if(allEvents.length===0&&europee.has(cup.slug)){
-        // Mostra sezione vuota con info
-        results.push({
-          slug:cup.slug, name:cup.name, group:cup.group,
-          phases:[{name:'Dati in caricamento',events:[]}],
-          totalEvents:0,
-        });
+      if(allEvents.length===0){
+        results.push({slug:cup.slug,name:cup.name,group:cup.group,
+          phases:[{name:'Dati in caricamento',events:[]}],totalEvents:0});
         continue;
       }
 
-      // ── Raggruppa per fase nell'ordine del calendario ─────────────────
+      // Raggruppa per fase nell'ordine del calendario
       const phaseMap=new Map();
       for(const ph of phaseNames) phaseMap.set(ph,[]);
       for(const e of allEvents){
         const ph=e.round||'';
         if(phaseMap.has(ph)) phaseMap.get(ph).push(e);
-        else {
-          if(!phaseMap.has(ph)) phaseMap.set(ph,[]);
-          phaseMap.get(ph).push(e);
-        }
+        else{ if(!phaseMap.has('Altre')) phaseMap.set('Altre',[]);
+              phaseMap.get('Altre').push(e); }
       }
 
       const phases=[...phaseMap.entries()]
@@ -2150,7 +2127,9 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         })
         .map(([name,evs])=>({
           name,
-          events:evs.sort((a,b)=>new Date(a.date)-new Date(b.date)),
+          events:evs
+            .sort((a,b)=>new Date(a.date)-new Date(b.date))
+            .map(e=>{delete e._prio;return e;}),
         }));
 
       results.push({slug:cup.slug,name:cup.name,group:cup.group,phases,totalEvents:allEvents.length});
@@ -2159,6 +2138,8 @@ app.get('/sport/soccer/cups',async(req,res)=>{
     res.json({cups:results});
   }catch(e){res.status(500).json({error:e.message});}
 });
+
+;
 
 ;
 
@@ -2225,15 +2206,25 @@ app.get('/stazione/cerca',async(req,res)=>{
 });
 
 // Partenze stazione
-// Helper: timestamp mezzanotte italiana (UTC+1/+2)
+// Timestamp mezzanotte italiana — esattamente come lo calcola il browser VT
 function italianMidnightMs(){
-  const now=new Date();
-  // Mezzanotte ora italiana
-  const it=new Date(now.toLocaleString('en-US',{timeZone:'Europe/Rome'}));
-  it.setHours(0,0,0,0);
-  // Converti back a UTC ms
-  const diff=now.getTime()-new Date(now.toLocaleString('en-US',{timeZone:'Europe/Rome'})).getTime();
-  return it.getTime()+diff;
+  // Ottieni data corrente nel fuso italiano
+  const formatter=new Intl.DateTimeFormat('it-IT',{
+    timeZone:'Europe/Rome', year:'numeric', month:'2-digit', day:'2-digit'
+  });
+  const parts=formatter.formatToParts(new Date());
+  const day=parseInt(parts.find(p=>p.type==='day').value);
+  const month=parseInt(parts.find(p=>p.type==='month').value);
+  const year=parseInt(parts.find(p=>p.type==='year').value);
+  // Crea Date in UTC che corrisponde alla mezzanotte italiana
+  // La mezzanotte in Italia = UTC - offset (1h inverno, 2h estate)
+  const midnightIT=new Date(Date.UTC(year,month-1,day,0,0,0));
+  // Offset Italia: check se siamo in ora legale
+  const janOffset=new Date(year,0,1).getTimezoneOffset();
+  const julOffset=new Date(year,6,1).getTimezoneOffset();
+  const isDST=midnightIT.getTimezoneOffset()<Math.max(janOffset,julOffset);
+  const italyOffsetMs=isDST?-2*3600000:-1*3600000; // UTC+2 DST, UTC+1 standard
+  return midnightIT.getTime()+(-italyOffsetMs); // es: UTC 23:00 = IT 00:00
 }
 
 async function vtFetch(tipo, id, ts){
@@ -2243,7 +2234,7 @@ async function vtFetch(tipo, id, ts){
       const r=await axios.get(`${base}/${tipo}/${id}/${ts}`,
         {headers:VT_H,timeout:15000,validateStatus:s=>s<500});
       const raw=(r.data||'').toString().trim();
-      if(r.status===400){errors.push(`${base}: 400 (timestamp/id errato)`);continue;}
+      if(r.status===400){errors.push(`${base}: 400 id=${id} ts=${ts}`);continue;}
       if(r.status===301||r.status===302){errors.push(`${base}: redirect ${r.status}`);continue;}
       if(raw.startsWith('<')||raw.includes('http-equiv')){errors.push(`${base}: HTML`);continue;}
       if(Array.isArray(r.data)) return {data:r.data,source:base.includes('new')?'VT2':'VT',ts};
@@ -2438,6 +2429,63 @@ app.get('/diag/cups/:slug',async(req,res)=>{
     res.json({slug,range,count:(d?.events||[]).length,sample:events});
   }catch(e){res.status(500).json({error:e.message});}
 });
+
+// ── F1 / MotoGP: notizie live da RSS ────────────────────────────────────────
+// Legge RSS feed gratuiti durante la gara per news in tempo reale
+app.get('/sport/f1/news',async(req,res)=>{
+  try{
+    const feeds=[
+      'https://www.autosport.com/rss/f1/news/',
+      'https://it.motorsport.com/rss/f1/news/',
+      'https://www.motorsport.com/rss/f1/news/',
+    ];
+    const items=[];
+    for(const url of feeds){
+      try{
+        const r=await axios.get(url,{timeout:8000,headers:{'User-Agent':'Mozilla/5.0'}});
+        const xml=r.data.toString();
+        const itemRx=/<item>([\s\S]*?)<\/item>/g; let m;
+        while((m=itemRx.exec(xml))!==null&&items.length<10){
+          const b=m[1];
+          const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\/${tag}>`,'i'));return x?x[1].trim():null;};
+          const title=getTag('title'); const link=getTag('link');
+          const pub=getTag('pubDate');
+          if(title&&link) items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:url.includes('autosport')?'Autosport':'Motorsport'});
+        }
+        if(items.length>=5) break;
+      }catch{}
+    }
+    res.json({items:items.slice(0,10)});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
+app.get('/sport/motogp/news',async(req,res)=>{
+  try{
+    const feeds=[
+      'https://it.motorsport.com/rss/motogp/news/',
+      'https://www.motorsport.com/rss/motogp/news/',
+      'https://www.motosprint.it/feed/',
+    ];
+    const items=[];
+    for(const url of feeds){
+      try{
+        const r=await axios.get(url,{timeout:8000,headers:{'User-Agent':'Mozilla/5.0'}});
+        const xml=r.data.toString();
+        const itemRx=/<item>([\s\S]*?)<\/item>/g; let m;
+        while((m=itemRx.exec(xml))!==null&&items.length<10){
+          const b=m[1];
+          const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\/${tag}>`,'i'));return x?x[1].trim():null;};
+          const title=getTag('title'); const link=getTag('link');
+          const pub=getTag('pubDate');
+          if(title&&link) items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:url.includes('motosprint')?'Motosprint':'Motorsport'});
+        }
+        if(items.length>=5) break;
+      }catch{}
+    }
+    res.json({items:items.slice(0,10)});
+  }catch(e){res.status(500).json({error:e.message});}
+});
+
 
 const PORT=process.env.PORT||10000;
 // ══════════════════════════════════════════════════════════════════════════════
