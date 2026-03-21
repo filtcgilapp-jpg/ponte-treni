@@ -475,46 +475,76 @@ app.get('/news',async(req,res)=>{
     res.json({query,items,fetchedAt:new Date().toISOString()});
   }catch(err){res.status(500).json({error:err.message});}
 });
+// Helper: cerca autocomplete treno e parsa le opzioni (gestisce omonimi)
+async function cercaTreno(n){
+  let b1='';
+  try{
+    const a=await axios.get(`${VT}/cercaNumeroTrenoTrenoAutocomplete/${n}`,{headers:VT_H,timeout:15000,responseType:'text'});
+    b1=(a.data||'').toString().trim();
+  }catch{
+    try{
+      const a2=await axios.get(`${VT2}/cercaNumeroTrenoTrenoAutocomplete/${n}`,{headers:VT_H,timeout:15000,responseType:'text'});
+      b1=(a2.data||'').toString().trim();
+    }catch{}
+  }
+  if(!b1||!b1.includes('|')) return [];
+  // Parsa ogni riga: "9685-TORINO PORTA NUOVA|9685-S00219-1741900800000"
+  return b1.split('\n').filter(l=>l.includes('|')).map(line=>{
+    const [before,after]=[line.split('|')[0]?.trim()||'', line.split('|')[1]?.trim()||''];
+    const parts=after.split('-');
+    if(parts.length<2) return null;
+    const numTreno=parts[0];
+    const codOrigine=parts[1];
+    const dataP=parts[2]||String(italianMidnightMs());
+    // Label per l'utente: "9685 da TORINO PORTA NUOVA"
+    const stazOrigine=before.replace(/^\d+-/,'').trim();
+    return {numTreno,codOrigine,dataP,label:`${numTreno} da ${stazOrigine}`,stazOrigine};
+  }).filter(Boolean);
+}
+
+async function andamentoTreno(codOrigine,numTreno,dataP){
+  let b2='';
+  try{
+    const r2=await axios.get(`${VT}/andamentoTreno/${codOrigine}/${numTreno}/${dataP}`,{headers:VT_H,timeout:15000,responseType:'text'});
+    b2=(r2.data||'').toString().trim();
+  }catch{
+    try{
+      const r2b=await axios.get(`${VT2}/andamentoTreno/${codOrigine}/${numTreno}/${dataP}`,{headers:VT_H,timeout:15000,responseType:'text'});
+      b2=(r2b.data||'').toString().trim();
+    }catch{}
+  }
+  if(!b2||b2.startsWith('<')||(!b2.startsWith('{')&&b2.length<10)) return null;
+  try{return JSON.parse(b2);}catch{return null;}
+}
+
 app.get('/treno/:numero',async(req,res)=>{
   try{
     const n=req.params.numero;
-    // Step 1: cerca numero treno — prova prima VT, poi VT2 come fallback
-    let b1='';
-    try{
-      const a=await axios.get(`${VT}/cercaNumeroTrenoTrenoAutocomplete/${n}`,{headers:VT_H,timeout:15000,responseType:'text'});
-      b1=(a.data||'').toString().trim();
-    }catch{
-      try{
-        const a2=await axios.get(`${VT2}/cercaNumeroTrenoTrenoAutocomplete/${n}`,{headers:VT_H,timeout:15000,responseType:'text'});
-        b1=(a2.data||'').toString().trim();
-      }catch{}
+    const opzioni=await cercaTreno(n);
+    if(!opzioni.length) return res.status(404).json({error:`Treno ${n} non trovato. Verifica il numero.`});
+    // Omonimi: più treni con stesso numero
+    if(opzioni.length>1){
+      return res.json({omonimi:true, opzioni:opzioni.map((o,i)=>({idx:i,label:o.label,stazOrigine:o.stazOrigine}))});
     }
-    if(!b1||!b1.includes('|'))return res.status(404).json({error:`Treno ${n} non trovato. Verifica il numero.`});
-    // Parsing risposta: "9685-TORINO PORTA NUOVA|9685-S00219-1741900800000"
-    const line=b1.split('\n')[0];
-    const afterPipe=line.split('|')[1]?.trim()||'';
-    const parts=afterPipe.split('-');
-    if(parts.length<2)return res.status(404).json({error:'Formato risposta non riconosciuto.'});
-    const codOrigine=parts[1]; // es. S00219
-    const numTreno=parts[0];   // es. 9685
-    const dataP=parts[2]||Date.now(); // timestamp ms
-    // Step 2: andamento treno — prova VT poi VT2
-    let b2='';
-    try{
-      const r2=await axios.get(`${VT}/andamentoTreno/${codOrigine}/${numTreno}/${dataP}`,{headers:VT_H,timeout:15000,responseType:'text'});
-      b2=(r2.data||'').toString().trim();
-    }catch{
-      try{
-        const r2b=await axios.get(`${VT2}/andamentoTreno/${codOrigine}/${numTreno}/${dataP}`,{headers:VT_H,timeout:15000,responseType:'text'});
-        b2=(r2b.data||'').toString().trim();
-      }catch{}
-    }
-    if(!b2||b2.startsWith('<')||b2.startsWith('{')==false&&b2.length<10){
-      return res.status(404).json({error:`Dati treno ${n} non disponibili. Il treno potrebbe non essere in circolazione oggi.`});
-    }
-    let p;
-    try{p=JSON.parse(b2);}
-    catch{return res.status(404).json({error:`Treno ${n} non attivo o dati non disponibili.`});}
+    // Treno unico: procedi direttamente
+    const {codOrigine,numTreno,dataP}=opzioni[0];
+    const p=await andamentoTreno(codOrigine,numTreno,dataP);
+    if(!p) return res.status(404).json({error:`Dati treno ${n} non disponibili. Il treno potrebbe non essere in circolazione oggi.`});
+    res.json(p);
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
+// Treno omonimo: prende la scelta dell'utente per indice
+app.get('/treno/:numero/scelta/:idx',async(req,res)=>{
+  try{
+    const n=req.params.numero;
+    const idx=parseInt(req.params.idx)||0;
+    const opzioni=await cercaTreno(n);
+    if(!opzioni.length) return res.status(404).json({error:`Treno ${n} non trovato.`});
+    const scelta=opzioni[idx]||opzioni[0];
+    const {codOrigine,numTreno,dataP}=scelta;
+    const p=await andamentoTreno(codOrigine,numTreno,dataP);
+    if(!p) return res.status(404).json({error:`Dati treno ${numTreno} non disponibili.`});
     res.json(p);
   }catch(err){res.status(500).json({error:err.message});}
 });
@@ -2206,25 +2236,26 @@ app.get('/stazione/cerca',async(req,res)=>{
 });
 
 // Partenze stazione
-// Timestamp mezzanotte italiana — esattamente come lo calcola il browser VT
+// Timestamp mezzanotte italiana — formula verificata
+// VT vuole: ms epoch della mezzanotte 00:00:00 nel fuso Europe/Rome
 function italianMidnightMs(){
-  // Ottieni data corrente nel fuso italiano
-  const formatter=new Intl.DateTimeFormat('it-IT',{
-    timeZone:'Europe/Rome', year:'numeric', month:'2-digit', day:'2-digit'
-  });
-  const parts=formatter.formatToParts(new Date());
-  const day=parseInt(parts.find(p=>p.type==='day').value);
-  const month=parseInt(parts.find(p=>p.type==='month').value);
-  const year=parseInt(parts.find(p=>p.type==='year').value);
-  // Crea Date in UTC che corrisponde alla mezzanotte italiana
-  // La mezzanotte in Italia = UTC - offset (1h inverno, 2h estate)
-  const midnightIT=new Date(Date.UTC(year,month-1,day,0,0,0));
-  // Offset Italia: check se siamo in ora legale
-  const janOffset=new Date(year,0,1).getTimezoneOffset();
-  const julOffset=new Date(year,6,1).getTimezoneOffset();
-  const isDST=midnightIT.getTimezoneOffset()<Math.max(janOffset,julOffset);
-  const italyOffsetMs=isDST?-2*3600000:-1*3600000; // UTC+2 DST, UTC+1 standard
-  return midnightIT.getTime()+(-italyOffsetMs); // es: UTC 23:00 = IT 00:00
+  const nowMs=Date.now();
+  const year=new Date(nowMs).getUTCFullYear();
+  // Ultima domenica di marzo (cambio ora estiva) alle 01:00 UTC
+  const lastSunMar=new Date(Date.UTC(year,2,31));
+  while(lastSunMar.getUTCDay()!==0) lastSunMar.setUTCDate(lastSunMar.getUTCDate()-1);
+  lastSunMar.setUTCHours(1,0,0,0);
+  // Ultima domenica di ottobre (fine ora estiva) alle 01:00 UTC
+  const lastSunOct=new Date(Date.UTC(year,9,31));
+  while(lastSunOct.getUTCDay()!==0) lastSunOct.setUTCDate(lastSunOct.getUTCDate()-1);
+  lastSunOct.setUTCHours(1,0,0,0);
+  const isDST=nowMs>=lastSunMar.getTime()&&nowMs<lastSunOct.getTime();
+  const offsetH=isDST?2:1; // UTC+2 estate, UTC+1 inverno
+  // Calcola giorno corrente in ora italiana
+  const itDate=new Date(nowMs+offsetH*3600000);
+  const itY=itDate.getUTCFullYear(),itM=itDate.getUTCMonth(),itD=itDate.getUTCDate();
+  // Mezzanotte italiana = UTC midnight - offset
+  return Date.UTC(itY,itM,itD,0,0,0)-offsetH*3600000;
 }
 
 async function vtFetch(tipo, id, ts){
