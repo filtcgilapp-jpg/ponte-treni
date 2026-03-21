@@ -1798,7 +1798,7 @@ const CUP_CALENDARS = [
   {slug:'uefa.super_cup',      name:'Supercoppa UEFA',         group:'Europa',       fd:null,   phases:[
     {name:'Finale',                  from:'20250812',to:'20250814'},
   ]},
-  {slug:'ita.coppa_italia',    name:'Coppa Italia',            group:'Italia',       fd:null,   wiki:'Coppa_Italia_2025-2026',       phases:[
+  {slug:'ita.coppa_italia',    name:'Coppa Italia',            group:'Italia',       fd:null,   wiki:'Coppa_Italia_2025-2026',   sofaId:285,  sofaSeason:67913,       phases:[
     {name:'Turno Preliminare',       from:'20250809',to:'20250811'},
     {name:'Trentaduesimi di Finale', from:'20250815',to:'20250819'},
     {name:'Sedicesimi di Finale',    from:'20250922',to:'20250926'},
@@ -1810,7 +1810,7 @@ const CUP_CALENDARS = [
   {slug:'ita.super_cup',       name:'Supercoppa Italiana',     group:'Italia',       fd:null,   phases:[
     {name:'Finale',                  from:'20260101',to:'20260120'},
   ]},
-  {slug:'esp.copa_del_rey',    name:'Copa del Rey',            group:'Spagna',       fd:null,   wiki:'Copa_del_Rey_2025-26',          phases:[
+  {slug:'esp.copa_del_rey',    name:'Copa del Rey',            group:'Spagna',       fd:null,   wiki:'Copa_del_Rey_2025-26',     sofaId:329,  sofaSeason:68000,          phases:[
     {name:'Turno Preliminare',       from:'20250826',to:'20250829'},
     {name:'Primo Turno',             from:'20251022',to:'20251025'},
     {name:'Sedicesimi di Finale',    from:'20251126',to:'20251130'},
@@ -1833,7 +1833,7 @@ const CUP_CALENDARS = [
     {name:'Semifinale',              from:'20260416',to:'20260421'},
     {name:'Finale',                  from:'20260515',to:'20260517'},
   ]},
-  {slug:'eng.league_cup',      name:'EFL Cup (Carabao Cup)',   group:'Inghilterra',  fd:null,   wiki:'2025-26_EFL_Cup',               phases:[
+  {slug:'eng.league_cup',      name:'EFL Cup (Carabao Cup)',   group:'Inghilterra',  fd:null,   wiki:'2025-26_EFL_Cup',          sofaId:21,   sofaSeason:68001,               phases:[
     {name:'Primo Turno',             from:'20250812',to:'20250815'},
     {name:'Secondo Turno',           from:'20250826',to:'20250829'},
     {name:'Terzo Turno',             from:'20250916',to:'20250919'},
@@ -2125,6 +2125,15 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         }catch{}
       }
 
+      // ── FONTE 4: Sofascore API (per coppe senza FD) ──────────────────
+      // Sofascore ha dati completi per tutte le coppe nazionali
+      if(!cup.fd&&cup.sofaId){
+        try{
+          const sofaEvs=await fetchSofascore(cup);
+          for(const e of sofaEvs) addEvent(e, 2); // stessa priorità ESPN
+        }catch{}
+      }
+
       const allEvents=[...byMatchKey.values()];
 
       // Coppe europee: mostra anche se vuote
@@ -2259,33 +2268,62 @@ function italianMidnightMs(){
   return Date.UTC(itY,itM,itD,0,0,0)-offsetH*3600000;
 }
 
-async function vtFetch(tipo, id, ts){
+async function vtFetch(tipo, id, stationTs){
+  // stationTs: timestamp fisso della stazione dall'autocomplete
   const errors=[];
-  // Prova tutti i formati URL: con ts, senza ts, con ID alternativo
-  const idVariants=[id, id.replace(/^S0*/,'')]; // S01700 e 1700
-  const tsVariants=[ts, italianMidnightMs(), 0]; // 0 = senza timestamp
+  const midnight=italianMidnightMs();
+  const now=Date.now();
+  // Prova tutte le combinazioni: timestamp fisso stazione, mezzanotte IT, now, secondi
+  // Mezzanotte UTC (come calcolerebbe un server UTC)
+  const midnightUTC=(()=>{const d=new Date();d.setUTCHours(0,0,0,0);return d.getTime();})();
+  const tsVariants=[
+    stationTs>0?stationTs:0,   // timestamp fisso dalla stazione
+    midnight,                   // mezzanotte italiana (UTC-1h)
+    midnightUTC,                // mezzanotte UTC
+    now,                        // timestamp corrente
+    Math.floor(midnight/1000),  // mezzanotte IT in secondi
+    Math.floor(midnightUTC/1000), // mezzanotte UTC in secondi
+  ].filter(t=>t>0);
   const tried=new Set();
-  for(const base of[VT,VT2]){
-    for(const vid of idVariants){
-      for(const vts of tsVariants){
-        const url=vts>0?`${base}/${tipo}/${vid}/${vts}`:`${base}/${tipo}/${vid}`;
-        if(tried.has(url)) continue; tried.add(url);
-        try{
-          const r=await axios.get(url,{headers:VT_H,timeout:12000,validateStatus:s=>true});
-          if(r.status===200){
-            const raw=(r.data||'').toString().trim();
-            if(raw.startsWith('<')||raw.includes('http-equiv')){errors.push(`HTML@${url.slice(40)}`);continue;}
-            if(Array.isArray(r.data)) return {data:r.data,source:`${base.includes('new')?'VT2':'VT'} id=${vid} ts=${vts}`,ts:vts};
-            if(raw.startsWith('[')){
-              try{const j=JSON.parse(raw);if(Array.isArray(j))return {data:j,source:`${base.includes('new')?'VT2':'VT'} id=${vid} ts=${vts}`,ts:vts};}catch{}
-            }
-            errors.push(`${r.status}@${url.slice(40)} fmt=${raw.slice(0,20)}`);
-          } else {
-            errors.push(`${r.status}@id=${vid}ts=${vts}`);
+  // Solo VT principale (VT2 dà sempre HTML)
+  for(const base of[VT]){
+    for(const ts of tsVariants){
+      const url=`${base}/${tipo}/${id}/${ts}`;
+      if(tried.has(url)) continue; tried.add(url);
+      try{
+        const r=await axios.get(url,{headers:VT_H,timeout:12000,validateStatus:s=>true});
+        if(r.status===200){
+          const raw=(r.data||'').toString().trim();
+          if(raw.startsWith('<')||raw.includes('http-equiv')){errors.push(`HTML@ts=${ts}`);continue;}
+          if(Array.isArray(r.data)&&r.data.length>0) return {data:r.data,source:`VT ts=${ts}`,ts};
+          if(raw.startsWith('[')){
+            try{
+              const j=JSON.parse(raw);
+              if(Array.isArray(j)) return {data:j,source:`VT ts=${ts}`,ts};
+            }catch{}
           }
-        }catch(e){errors.push(`err@${url.slice(40)}: ${e.message.slice(0,30)}`);}
-      }
+          errors.push(`200 vuoto@ts=${ts} fmt=${raw.slice(0,15)}`);
+        } else {
+          errors.push(`${r.status}@ts=${ts}`);
+        }
+      }catch(e){errors.push(`err@ts=${ts}: ${e.message.slice(0,30)}`);}
     }
+  }
+  // Fallback VT2
+  for(const ts of[stationTs,midnight].filter(t=>t>0)){
+    const url=`${VT2}/${tipo}/${id}/${ts}`;
+    if(tried.has(url)) continue; tried.add(url);
+    try{
+      const r=await axios.get(url,{headers:VT_H,timeout:12000,validateStatus:s=>true});
+      if(r.status===200){
+        const raw=(r.data||'').toString().trim();
+        if(raw.startsWith('<')) {errors.push(`VT2 HTML@ts=${ts}`);continue;}
+        if(Array.isArray(r.data)&&r.data.length>0) return {data:r.data,source:`VT2 ts=${ts}`,ts};
+        if(raw.startsWith('[')){
+          try{const j=JSON.parse(raw);if(Array.isArray(j))return {data:j,source:`VT2 ts=${ts}`,ts};}catch{}
+        }
+      }
+    }catch{}
   }
   return {data:null,errors};
 }
