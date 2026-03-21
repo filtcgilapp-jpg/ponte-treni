@@ -1986,6 +1986,29 @@ function makeMatch(cup, home, away, hs, as, date, phase, idx, pens='') {
 }
 
 // ── Cups endpoint ─────────────────────────────────────────────────────────────
+
+// Spezza un range YYYYMMDD-YYYYMMDD in chunks di N giorni
+function dateChunks(from, to, days){
+  const chunks=[];
+  let cur=new Date(
+    parseInt(from.slice(0,4)),
+    parseInt(from.slice(4,6))-1,
+    parseInt(from.slice(6,8))
+  );
+  const end=new Date(
+    parseInt(to.slice(0,4)),
+    parseInt(to.slice(4,6))-1,
+    parseInt(to.slice(6,8))
+  );
+  const fmt=d=>`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  while(cur<=end){
+    const chunkEnd=new Date(cur.getTime()+days*86400000);
+    chunks.push([fmt(cur), fmt(chunkEnd>end?end:chunkEnd)]);
+    cur=new Date(chunkEnd.getTime()+86400000);
+  }
+  return chunks;
+}
+
 app.get('/sport/soccer/cups',async(req,res)=>{
   try{
     const results=[];
@@ -1994,31 +2017,39 @@ app.get('/sport/soccer/cups',async(req,res)=>{
       const allEvents=[]; const seen=new Set();
       const phaseNames=cup.phases.map(p=>p.name);
 
-      // ── 1. ESPN per ogni fase ──────────────────────────────────────────
+      // ── 1. ESPN per ogni fase — chunk da 14 giorni ───────────────────
       for(const phase of cup.phases){
-        try{
-          const d=await fetch(
-            `${ESPN}/soccer/${cup.slug}/scoreboard?dates=${phase.from}-${phase.to}`,
-            1800000);
-          for(const e of(d?.events||[])){
-            const ne=normEvent(e,cup.name,cup.slug);
-            if(!ne||seen.has(ne.id)) continue;
-            seen.add(ne.id); ne.round=phase.name;
-            allEvents.push(ne);
-          }
-        }catch{}
+        // Spezza il range in chunk da 14 giorni (limite pratico ESPN)
+        const chunks=dateChunks(phase.from,phase.to,14);
+        for(const [cfrom,cto] of chunks){
+          try{
+            const d=await fetch(
+              `${ESPN}/soccer/${cup.slug}/scoreboard?dates=${cfrom}-${cto}`,
+              1800000);
+            for(const e of(d?.events||[])){
+              const ne=normEvent(e,cup.name,cup.slug);
+              if(!ne||seen.has(ne.id)) continue;
+              seen.add(ne.id); ne.round=phase.name;
+              allEvents.push(ne);
+            }
+          }catch{}
+        }
       }
 
-      // ── 2. FD per coppe con codice (CL, EL, FA Cup, DFB, CDF) ─────────
+      // ── 2. FD per coppe con codice — include partite passate E future ──
       if(cup.fd&&(cup.slug==='uefa.champions'||cup.slug==='uefa.europa'||
          cup.slug==='eng.fa'||cup.slug==='ger.dfb_pokal'||cup.slug==='fra.coupe_de_france')){
         try{
           const yr=new Date().getFullYear();
-          let fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-1}`,3600000).catch(()=>null);
+          // Prende tutti i match della stagione (passati + futuri) 
+          let fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-1}&limit=200`,3600000).catch(()=>null);
+          if(!fdData?.matches?.length) fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-1}`,3600000).catch(()=>null);
           if(!fdData?.matches?.length) fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-2}`,3600000).catch(()=>null);
           if(fdData?.matches?.length){
             for(const m of fdData.matches){
-              const eid=`fd:${m.id}`; if(seen.has(eid)) continue;
+              const eid=`fd:${m.id}`;
+              // Non deduplichiamo contro ESPN: FD ha dati più completi
+              if(seen.has(eid)) continue;
               const mDate=(m.utcDate||'').replace(/-/g,'').slice(0,8);
               const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
               if(!phase) continue;
@@ -2039,15 +2070,17 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         }catch{}
       }
 
-      // ── 3. FD per UECL ────────────────────────────────────────────────
-      if(cup.slug==='uefa.conference'&&cup.fd){
+      // ── 3. FD per UECL e tutte le coppe europee senza partite ────────
+      if(cup.fd&&allEvents.length<5){
         try{
           const yr=new Date().getFullYear();
           for(const season of[yr-1,yr-2]){
             const fdData=await fd(`/competitions/${cup.fd}/matches?season=${season}`,3600000).catch(()=>null);
             if(!fdData?.matches?.length) continue;
             for(const m of fdData.matches){
-              const eid=`fd:${m.id}`; if(seen.has(eid)) continue;
+              const eid=`fd:${m.id}`;
+              // Non deduplichiamo contro ESPN: FD ha dati più completi
+              if(seen.has(eid)) continue;
               const mDate=(m.utcDate||'').replace(/-/g,'').slice(0,8);
               const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
               if(!phase) continue;
@@ -2160,40 +2193,29 @@ app.get('/stazione/cerca',async(req,res)=>{
   if(q.length<2) return res.json({stazioni:[]});
   try{
     let stazioni=[];
-    // Prova tutti gli endpoint ViaggiatrEno
     const urls=[
       `${VT}/cercaStazioneAC/${encodeURIComponent(q)}`,
       `${VT2}/cercaStazioneAC/${encodeURIComponent(q)}`,
-      `${VT}/autocompletaStazione/${encodeURIComponent(q)}`,
     ];
     for(const url of urls){
       try{
         const r=await axios.get(url,{headers:VT_H,timeout:10000,responseType:'text'});
         const raw=(r.data||'').toString().trim();
-        // Scarta HTML, JS, vuoto
-        if(!raw||raw.length<3||raw.startsWith('<')||raw.startsWith('function')||raw.startsWith('//')) continue;
-        // Prova JSON
-        try{
-          const j=JSON.parse(raw);
-          if(Array.isArray(j)&&j.length>0){
-            stazioni=j.map(s=>({
-              nomeLungo:(s.nomeLungo||s.nomeStazione||s.nome||s.name||'').trim().toUpperCase(),
-              id:(s.id||s.codiceStazione||s.code||'').toString().trim(),
-            })).filter(s=>s.nomeLungo&&s.id);
-            if(stazioni.length>0) break;
-          }
-        }catch{}
-        // Formato testo: "NOME|S01700-NOME-TIMESTAMP" oppure "NOME|S01700\n"
-        const parsed=raw.split(/[\n\r]+/).filter(Boolean).map(line=>{
+        if(!raw||raw.length<3||raw.startsWith('<')||raw.includes('http-equiv')) continue;
+        // Formato VT: "NOME|S01700-NOMEORIGINE-TIMESTAMP"
+        // Il timestamp e' usabile per partenze/arrivi
+        const parsed=raw.split('\n').filter(Boolean).map(line=>{
           const sep=line.indexOf('|');
           if(sep<1) return null;
           const nome=line.slice(0,sep).trim().toUpperCase();
-          // Codice è tutto dopo | — prendi solo la parte S+cifre
           const afterPipe=line.slice(sep+1).trim();
-          // Estrai codice stazione (formato S01700 o S01700-0)
-          const codM=afterPipe.match(/^(S\d{5})/);
-          const id=codM?codM[1]:afterPipe.split('-')[0].trim();
-          return nome&&id.length>2?{nomeLungo:nome,id}:null;
+          // Parti: S01700-NOMEORIGINE-TIMESTAMP
+          const parts=afterPipe.split('-');
+          const id=parts[0].trim(); // es: S01700
+          // Timestamp: ultima parte numerica lunga (ms epoch)
+          const tsStr=parts.find(p=>/^\d{13}$/.test(p))||'';
+          const ts=tsStr?parseInt(tsStr):0;
+          return (nome&&id.match(/^S\d{5}$/))?{nomeLungo:nome,id,ts}:null;
         }).filter(Boolean);
         if(parsed.length>0){stazioni=parsed;break;}
       }catch{}
@@ -2201,7 +2223,6 @@ app.get('/stazione/cerca',async(req,res)=>{
     res.json({stazioni:stazioni.slice(0,10)});
   }catch(e){res.status(500).json({error:e.message});}
 });
-;
 
 // Partenze stazione
 // Helper: timestamp mezzanotte italiana (UTC+1/+2)
@@ -2216,28 +2237,21 @@ function italianMidnightMs(){
 }
 
 async function vtFetch(tipo, id, ts){
-  // tipo: 'partenze' o 'arrivi'
   const errors=[];
   for(const base of[VT,VT2]){
     try{
       const r=await axios.get(`${base}/${tipo}/${id}/${ts}`,
-        {headers:VT_H,timeout:15000,maxRedirects:3,responseType:'text'});
+        {headers:VT_H,timeout:15000,validateStatus:s=>s<500});
       const raw=(r.data||'').toString().trim();
-      // Scarta HTML (meta refresh, pagina di errore)
-      if(raw.startsWith('<')||raw.includes('http-equiv')||raw.includes('<!DOCTYPE')) {
-        errors.push(`${base}: HTML response`);
-        continue;
-      }
-      if(raw.startsWith('[')){
-        try{
-          const j=JSON.parse(raw);
-          if(Array.isArray(j)) return {data:j,source:base.includes('new')?'VT2':'VT',ts};
-        }catch{}
-      }
-      // Forse axios ha già parsato il JSON
+      if(r.status===400){errors.push(`${base}: 400 (timestamp/id errato)`);continue;}
+      if(r.status===301||r.status===302){errors.push(`${base}: redirect ${r.status}`);continue;}
+      if(raw.startsWith('<')||raw.includes('http-equiv')){errors.push(`${base}: HTML`);continue;}
       if(Array.isArray(r.data)) return {data:r.data,source:base.includes('new')?'VT2':'VT',ts};
-      errors.push(`${base}: unexpected format ${raw.slice(0,40)}`);
-    }catch(e){errors.push(`${base}: ${e.message.slice(0,40)}`);}
+      if(raw.startsWith('[')){
+        try{const j=JSON.parse(raw);if(Array.isArray(j))return {data:j,source:base.includes('new')?'VT2':'VT',ts};}catch{}
+      }
+      errors.push(`${base}: status=${r.status} fmt=${raw.slice(0,30)}`);
+    }catch(e){errors.push(`${base}: ${e.message.slice(0,50)}`);}
   }
   return {data:null,errors};
 }
@@ -2245,11 +2259,17 @@ async function vtFetch(tipo, id, ts){
 app.get('/stazione/:id/partenze',async(req,res)=>{
   try{
     const id=req.params.id.trim();
-    const now=Date.now();
+    // ts: timestamp passato dal client (dalla risposta cerca stazione)
+    // oppure usa mezzanotte italiana e timestamp corrente come fallback
+    const tsParam=req.query.ts?parseInt(req.query.ts):0;
     const midnight=italianMidnightMs();
-    // Prova con timestamp corrente e mezzanotte italiana
-    let result=await vtFetch('partenze',id,now);
-    if(!result.data) result=await vtFetch('partenze',id,midnight);
+    const now=Date.now();
+    const timestamps=[tsParam,midnight,now].filter(t=>t>0);
+    let result={data:null,errors:[]};
+    for(const ts of timestamps){
+      result=await vtFetch('partenze',id,ts);
+      if(result.data) break;
+    }
     if(!result.data) return res.json({partenze:[],debug:JSON.stringify(result.errors||[])});
     const partenze=(result.data).slice(0,30).map(t=>({
       numero:t.compNumeroTreno||t.numeroTreno||'',
@@ -2263,17 +2283,22 @@ app.get('/stazione/:id/partenze',async(req,res)=>{
       nonPartito:!!t.nonPartito,
       cancelled:!!(t.provvedimento===1||t.tipoTreno==='CANC'),
     }));
-    res.json({partenze,debug:`${result.source}:${result.data.length}`});
+    res.json({partenze,debug:`${result.src||'?'}:${result.data.length}`});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
 app.get('/stazione/:id/arrivi',async(req,res)=>{
   try{
     const id=req.params.id.trim();
-    const now=Date.now();
+    const tsParam=req.query.ts?parseInt(req.query.ts):0;
     const midnight=italianMidnightMs();
-    let result=await vtFetch('arrivi',id,now);
-    if(!result.data) result=await vtFetch('arrivi',id,midnight);
+    const now=Date.now();
+    const timestamps=[tsParam,midnight,now].filter(t=>t>0);
+    let result={data:null,errors:[]};
+    for(const ts of timestamps){
+      result=await vtFetch('arrivi',id,ts);
+      if(result.data) break;
+    }
     if(!result.data) return res.json({arrivi:[],debug:JSON.stringify(result.errors||[])});
     const arrivi=(result.data).slice(0,30).map(t=>({
       numero:t.compNumeroTreno||t.numeroTreno||'',
@@ -2286,13 +2311,9 @@ app.get('/stazione/:id/arrivi',async(req,res)=>{
       inStazione:!!t.inStazione,
       cancelled:!!(t.provvedimento===1||t.tipoTreno==='CANC'),
     }));
-    res.json({arrivi,debug:`${result.source}:${result.data.length}`});
+    res.json({arrivi,debug:`${result.src||'?'}:${result.data.length}`});
   }catch(e){res.status(500).json({error:e.message});}
 });
-
-;
-
-;
 
 // Helper orario: converti timestamp ms → "HH:MM"
 function _fmtOrario(ts){
@@ -2339,18 +2360,6 @@ const WIKI_CUP_PAGES={
   'ger.dfb_pokal':       'DFB-Pokal_2025/26',
   'eng.league_cup':      '2025-26_EFL_Cup',
 };
-
-async function fetchWikiMatches(slug){
-  const page=WIKI_CUP_PAGES[slug];
-  if(!page) return [];
-  try{
-    const url=`https://it.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(page)}&prop=wikitext&format=json&origin=*`;
-    const r=await axios.get(url,{timeout:15000,headers:{'User-Agent':'Mozilla/5.0 (compatible; bot)'}});
-    const wt=r.data?.parse?.wikitext?.['*']||'';
-    if(!wt) return [];
-    return parseWikiMatches(wt, slug);
-  }catch{return [];}
-}
 
 function parseWikiMatches(wt, slug){
   const matches=[];
