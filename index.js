@@ -1067,7 +1067,8 @@ app.get('/sport/f1/calendar',async(req,res)=>{
     // Fallback hardcoded se Jolpica vuoto
     if(races.length===0) races=F1_2026.map(r=>({...r}));
     // Risultati per tutte le gare passate (in parallelo, top 3)
-    const past=races.filter(r=>new Date(r.date)<now);
+    const todayDateStr=now.toISOString().slice(0,10);
+    const past=races.filter(r=>(r.date||'')< todayDateStr);
     await Promise.all(past.map(async race=>{
       if(race.Results&&race.Results.length>0) return; // già presenti
       try{
@@ -1413,8 +1414,10 @@ const MOTOGP_2026=[
 
 app.get('/sport/motogp/calendar',async(req,res)=>{
   const now=new Date();
-  const past=MOTOGP_2026.filter(r=>new Date(r.dateEvent)<now);
-  const upcoming=MOTOGP_2026.filter(r=>new Date(r.dateEvent)>=now);
+  // Gara è 'past' solo se la data evento è IERI o prima (non oggi)
+  const todayStr=now.toISOString().slice(0,10);
+  const past=MOTOGP_2026.filter(r=>r.dateEvent<todayStr);
+  const upcoming=MOTOGP_2026.filter(r=>r.dateEvent>=todayStr);
   res.json({past,upcoming});
 });
 
@@ -1565,56 +1568,52 @@ app.get('/sport/motogp/past',async(req,res)=>{
 app.get('/sport/motogp/live',async(req,res)=>{
   try{
     const now=new Date();
-    // Gara in corso? (±4h dalla data evento)
+    // Cerca gara in corso o conclusa oggi (±6h per coprire gara + cerimonie)
     const live=MOTOGP_2026.find(r=>{
       const d=new Date(r.dateEvent+'T12:00:00Z');
-      return Math.abs(now-d)<4*3600000;
+      return Math.abs(now-d)<6*3600000;
     });
     if(!live) return res.json({live:false});
-    // 1. Prova motosprint.it live timing (scraping)
-    try{
-      // Cerca pagina live motosprint per il GP corrente
-      const gpName=live.strEvent.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
-      const msUrl=`https://www.motosprint.it/live/moto-gp`;
-      const msR=await axios.get(msUrl,{timeout:8000,headers:{
-        'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0) AppleWebKit/605.1.15',
-        'Accept':'text/html',
-      }});
-      const html=(msR.data||'').toString();
-      // Cerca link alla gara corrente nella lista live
-      const linkM=html.match(/href="(\/live\/moto-gp\/[^"]+)"/i);
-      if(linkM){
-        const liveUrl=`https://www.motosprint.it${linkM[1]}`;
-        const liveR=await axios.get(liveUrl,{timeout:10000,headers:{
-          'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0) AppleWebKit/605.1.15',
-        }});
-        const liveHtml=(liveR.data||'').toString();
-        // Parsa classifica live
-        const positions=[];
-        // Pattern: pos, nome pilota, team, distacco
-        const rows=liveHtml.matchAll(/<tr[^>]*>\s*<td[^>]*>(\d+)<\/td>\s*<td[^>]*>([^<]+)<\/td>\s*<td[^>]*>([^<]+)<\/td>/g);
-        for(const row of rows){
-          positions.push({pos:parseInt(row[1]),name:row[2].trim(),team:row[3].trim()});
-          if(positions.length>=20) break;
+    // ESPN MotoGP scoreboard — prova date range ±1 giorno
+    const dateStr=live.dateEvent.replace(/-/g,'');
+    // Prova con daterange per catturare la gara
+    const d=new Date(live.dateEvent);
+    const d1=new Date(d.getTime()-86400000);
+    const d2=new Date(d.getTime()+86400000);
+    const fmt=dt=>`${dt.getFullYear()}${String(dt.getMonth()+1).padStart(2,'0')}${String(dt.getDate()).padStart(2,'0')}`;
+    const range=`${fmt(d1)}-${fmt(d2)}`;
+    const urls=[
+      `https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${dateStr}`,
+      `https://site.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${range}`,
+      `https://site.web.api.espn.com/apis/v2/sports/racing/motogp/scoreboard`,
+    ];
+    for(const url of urls){
+      try{
+        const r=await axios.get(url,{timeout:10000});
+        const events=r.data?.events||[];
+        // Cerca la gara corrispondente
+        for(const ev of events){
+          const comps=ev.competitions?.[0]?.competitors||[];
+          if(comps.length===0) continue;
+          const positions=comps
+            .sort((a,b)=>(a.order||a.linescores?.[0]?.rank||99)-(b.order||b.linescores?.[0]?.rank||99))
+            .slice(0,20)
+            .map((c,i)=>({
+              pos:c.order||c.linescores?.[0]?.rank||i+1,
+              name:c.athlete?.displayName||c.team?.displayName||'',
+              team:c.team?.name||c.team?.displayName||'',
+              gap:c.linescores?.[0]?.value||'',
+            }));
+          if(positions.length>0){
+            const isLive=ev.competitions?.[0]?.status?.type?.state==='in';
+            return res.json({live:isLive||true,race:ev.name||live.strEvent,positions,source:'espn'});
+          }
         }
-        if(positions.length>0){
-          return res.json({live:true,race:live.strEvent,positions,source:'motosprint'});
-        }
-      }
-    }catch{}
-    // 2. Fallback ESPN
-    try{
-      const dateStr=live.dateEvent.replace(/-/g,'');
-      const d=await axios.get(
-        `https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${dateStr}`,
-        {timeout:8000});
-      const comps=d.data?.events?.[0]?.competitions?.[0]?.competitors||[];
-      const positions=comps.sort((a,b)=>(a.order||99)-(b.order||99)).map(c=>({
-        pos:c.order,name:c.athlete?.displayName||'',team:c.team?.name||'',
-      }));
-      if(positions.length>0) return res.json({live:true,race:live.strEvent,positions,source:'espn'});
-    }catch{}
-    res.json({live:true,race:live.strEvent,positions:[],source:'none'});
+      }catch{}
+    }
+    // Nessun dato live disponibile
+    res.json({live:true,race:live.strEvent,positions:[],
+      note:'Gara in corso — dati non ancora disponibili. Riprova tra qualche minuto.'});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1871,8 +1870,9 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         }catch{}
       }
 
-      // Integra FD per CL/EL (stage ufficiali per overwrite)
-      if((cup.slug==='uefa.champions'||cup.slug==='uefa.europa')&&cup.fd){
+      // Integra FD per CL/EL/coppe nazionali con codice FD
+      if(cup.fd&&(cup.slug==='uefa.champions'||cup.slug==='uefa.europa'||
+         cup.slug==='eng.fa'||cup.slug==='ger.dfb_pokal'||cup.slug==='fra.coupe_de_france')){
         try{
           const yr=new Date().getFullYear();
           let fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-1}`,3600000).catch(()=>null);
@@ -1945,7 +1945,18 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         }catch{}
       }
 
-      if(allEvents.length===0) continue;
+      // Non saltare coppe europee principali anche se ESPN non ha eventi
+      const importantSlugs=new Set(['uefa.champions','uefa.europa','uefa.conference']);
+      if(allEvents.length===0&&!importantSlugs.has(cup.slug)) continue;
+      // Per UECL senza eventi ESPN: crea sezione vuota con info
+      if(allEvents.length===0&&importantSlugs.has(cup.slug)){
+        results.push({
+          slug:cup.slug, name:cup.name, group:cup.group,
+          phases:[{name:'Partite non disponibili',events:[]}],
+          totalEvents:0,
+        });
+        continue;
+      }
 
       // Raggruppa per fase rispettando l'ordine del calendario
       const phaseMap=new Map();
@@ -2052,107 +2063,73 @@ app.get('/stazione/cerca',async(req,res)=>{
 app.get('/stazione/:id/partenze',async(req,res)=>{
   try{
     const id=req.params.id;
-    let data=null;
-    let lastRaw='';
-    // 1. API RFI iechub (monitor ufficiale) — prova vari URL
-    const rfiUrls=[
-      'https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
-      'http://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
-    ];
-    for(const rfiUrl of rfiUrls){
+    const now=Date.now();
+    let data=null; let lastRaw='';
+    for(const base of[VT,VT2]){
       try{
-        const r=await axios.post(rfiUrl,{Arrival:false,Code:id},
-          {headers:{'Content-Type':'application/json','Accept':'application/json',
-            'Origin':'https://www.rfi.it','Referer':'https://www.rfi.it/'},
-           timeout:12000,maxRedirects:5});
-        const raw=r.data;
-        const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.Transits)?raw.Transits:null);
-        if(arr&&arr.length>=0){data=arr;lastRaw=`rfi:${arr.length}`;break;}
-      }catch(e){lastRaw=`rfi_err:${e.message.slice(0,50)}`;}
-    }
-    // 2. Fallback ViaggiatrEno (se RFI non risponde)
-    if(!data){
-      const now=Date.now();
-      for(const base of[VT,VT2]){
-        try{
-          const r=await axios.get(`${base}/partenze/${id}/${now}`,
-            {headers:VT_H,timeout:12000,maxRedirects:0});
-          if(Array.isArray(r.data)){data=r.data;lastRaw=`vt:${r.data.length}`;break;}
-          const raw=(r.data||'').toString().trim();
-          if(raw.startsWith('[')){try{const j=JSON.parse(raw);if(Array.isArray(j)){data=j;lastRaw=`vt_txt:${j.length}`;break;}}catch{}}
-          lastRaw=`vt_raw:${raw.slice(0,60)}`;
-        }catch(e){lastRaw=`vt_err:${e.message.slice(0,50)}`;}
-      }
+        const r=await axios.get(`${base}/partenze/${id}/${now}`,
+          {headers:VT_H,timeout:15000});
+        if(Array.isArray(r.data)){
+          data=r.data; lastRaw=`ok:${r.data.length}`; break;
+        }
+        const raw=(r.data||'').toString().trim();
+        lastRaw=raw.slice(0,80);
+        if(raw.startsWith('<')||raw.includes('refresh')) continue;
+        try{const j=JSON.parse(raw);if(Array.isArray(j)){data=j;lastRaw=`txt:${j.length}`;break;}}catch{}
+      }catch(e){lastRaw=`err:${e.message.slice(0,50)}`;}
     }
     if(!data) return res.json({partenze:[],debug:lastRaw});
-    // Normalizza formato RFI e VT
-    const normP=t=>({
-      numero:t.TrainCode||t.compNumeroTreno||t.numeroTreno||'',
-      categoria:t.TrainCategory||t.categoria||'',
-      destinazione:(t.Direction||t.StationEnd||t.destinazione||'').toUpperCase(),
-      orario:t.DepartureTime?t.DepartureTime.slice(11,16):(t.compOrarioPartenza||_fmtOrario(t.orarioPartenza)),
-      ritardo:typeof t.DelayMinutes==='number'?t.DelayMinutes:(t.ritardo||0),
-      binarioProgrammato:t.TrackNumber||t.binarioProgrammatoPartenzaDescrizione||'',
-      binarioEffettivo:t.ActualTrackNumber||t.binarioEffettivoPartenzaDescrizione||'',
-      inStazione:!!(t.IsAtStation||t.inStazione),
-      nonPartito:!!(t.NotDeparted||t.nonPartito),
-      cancelled:!!(t.Cancelled||t.provvedimento===1||t.tipoTreno==='CANC'),
-    });
-    res.json({partenze:data.slice(0,30).map(normP),debug:lastRaw});
+    const partenze=data.slice(0,30).map(t=>({
+      numero:t.compNumeroTreno||t.numeroTreno||'',
+      categoria:t.categoria||'',
+      destinazione:(t.destinazione||'').toUpperCase(),
+      orario:t.compOrarioPartenza||_fmtOrario(t.orarioPartenza),
+      ritardo:t.ritardo||0,
+      binarioProgrammato:t.binarioProgrammatoPartenzaDescrizione||'',
+      binarioEffettivo:t.binarioEffettivoPartenzaDescrizione||'',
+      inStazione:!!t.inStazione,
+      nonPartito:!!t.nonPartito,
+      cancelled:!!(t.provvedimento===1||t.tipoTreno==='CANC'),
+    }));
+    res.json({partenze,debug:lastRaw});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// Arrivi stazione
 app.get('/stazione/:id/arrivi',async(req,res)=>{
   try{
     const id=req.params.id;
-    let data=null;
-    let lastRaw='';
-    // 1. API RFI iechub
-    const rfiUrlsA=[
-      'https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
-      'http://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
-    ];
-    for(const rfiUrl of rfiUrlsA){
+    const now=Date.now();
+    let data=null; let lastRaw='';
+    for(const base of[VT,VT2]){
       try{
-        const r=await axios.post(rfiUrl,{Arrival:true,Code:id},
-          {headers:{'Content-Type':'application/json','Accept':'application/json',
-            'Origin':'https://www.rfi.it','Referer':'https://www.rfi.it/'},
-           timeout:12000,maxRedirects:5});
-        const raw=r.data;
-        const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.Transits)?raw.Transits:null);
-        if(arr&&arr.length>=0){data=arr;lastRaw=`rfi:${arr.length}`;break;}
-      }catch(e){lastRaw=`rfi_err:${e.message.slice(0,50)}`;}
-    }
-    // 2. Fallback VT
-    if(!data){
-      const now=Date.now();
-      for(const base of[VT,VT2]){
-        try{
-          const r=await axios.get(`${base}/arrivi/${id}/${now}`,
-            {headers:VT_H,timeout:12000,maxRedirects:0});
-          if(Array.isArray(r.data)){data=r.data;lastRaw=`vt:${r.data.length}`;break;}
-          const raw=(r.data||'').toString().trim();
-          if(raw.startsWith('[')){try{const j=JSON.parse(raw);if(Array.isArray(j)){data=j;lastRaw=`vt_txt:${j.length}`;break;}}catch{}}
-          lastRaw=`vt_raw:${raw.slice(0,60)}`;
-        }catch(e){lastRaw=`vt_err:${e.message.slice(0,50)}`;}
-      }
+        const r=await axios.get(`${base}/arrivi/${id}/${now}`,
+          {headers:VT_H,timeout:15000});
+        if(Array.isArray(r.data)){
+          data=r.data; lastRaw=`ok:${r.data.length}`; break;
+        }
+        const raw=(r.data||'').toString().trim();
+        lastRaw=raw.slice(0,80);
+        if(raw.startsWith('<')||raw.includes('refresh')) continue;
+        try{const j=JSON.parse(raw);if(Array.isArray(j)){data=j;lastRaw=`txt:${j.length}`;break;}}catch{}
+      }catch(e){lastRaw=`err:${e.message.slice(0,50)}`;}
     }
     if(!data) return res.json({arrivi:[],debug:lastRaw});
-    const normA=t=>({
-      numero:t.TrainCode||t.compNumeroTreno||t.numeroTreno||'',
-      categoria:t.TrainCategory||t.categoria||'',
-      origine:(t.Direction||t.StationStart||t.origine||'').toUpperCase(),
-      orario:t.ArrivalTime?t.ArrivalTime.slice(11,16):(t.compOrarioArrivo||_fmtOrario(t.orarioArrivo)),
-      ritardo:typeof t.DelayMinutes==='number'?t.DelayMinutes:(t.ritardo||0),
-      binarioProgrammato:t.TrackNumber||t.binarioProgrammatoArrivoDescrizione||'',
-      binarioEffettivo:t.ActualTrackNumber||t.binarioEffettivoArrivoDescrizione||'',
-      inStazione:!!(t.IsAtStation||t.inStazione),
-      cancelled:!!(t.Cancelled||t.provvedimento===1||t.tipoTreno==='CANC'),
-    });
-    res.json({arrivi:data.slice(0,30).map(normA),debug:lastRaw});
+    const arrivi=data.slice(0,30).map(t=>({
+      numero:t.compNumeroTreno||t.numeroTreno||'',
+      categoria:t.categoria||'',
+      origine:(t.origine||'').toUpperCase(),
+      orario:t.compOrarioArrivo||_fmtOrario(t.orarioArrivo),
+      ritardo:t.ritardo||0,
+      binarioProgrammato:t.binarioProgrammatoArrivoDescrizione||'',
+      binarioEffettivo:t.binarioEffettivoArrivoDescrizione||'',
+      inStazione:!!t.inStazione,
+      cancelled:!!(t.provvedimento===1||t.tipoTreno==='CANC'),
+    }));
+    res.json({arrivi,debug:lastRaw});
   }catch(e){res.status(500).json({error:e.message});}
 });
+
+;
 
 // Helper orario: converti timestamp ms → "HH:MM"
 function _fmtOrario(ts){
@@ -2271,6 +2248,24 @@ function parseWikiMatches(wt, slug){
   return matches;
 }
 
+
+app.get('/diag/cups/:slug',async(req,res)=>{
+  const slug=req.params.slug;
+  const range=req.query.range||'20251201-20260101';
+  try{
+    const d=await fetch(`${ESPN}/soccer/${slug}/scoreboard?dates=${range}`,0);
+    const events=(d?.events||[]).slice(0,5).map(e=>{
+      const comp=(e.competitions||[])[0]||{};
+      return{
+        id:e.id,date:(e.date||'').slice(0,10),
+        home:comp.competitors?.find(c=>c.homeAway==='home')?.team?.displayName,
+        away:comp.competitors?.find(c=>c.homeAway==='away')?.team?.displayName,
+        status:comp.status?.type?.shortDetail,
+      };
+    });
+    res.json({slug,range,count:(d?.events||[]).length,sample:events});
+  }catch(e){res.status(500).json({error:e.message});}
+});
 
 const PORT=process.env.PORT||10000;
 // ══════════════════════════════════════════════════════════════════════════════
