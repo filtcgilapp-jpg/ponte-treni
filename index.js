@@ -20,9 +20,28 @@ const ESPN2='https://site.web.api.espn.com/apis/v2/sports';
 
 const VT   ='https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno';
 const VT2  ='https://www.viaggiatreno.it/viaggiatrenonew/resteasy/viaggiatreno';
-const VT_H ={'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
-  'Referer':'https://www.viaggiatreno.it/','Origin':'https://www.viaggiatreno.it',
-  'Accept':'text/plain,application/json,*/*','Accept-Language':'it-IT,it;q=0.9'};
+// Headers VT — ruotiamo User-Agent per evitare pattern recognition
+const VT_USER_AGENTS=[
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+];
+function getVT_H(){
+  const ua=VT_USER_AGENTS[Math.floor(Date.now()/30000)%VT_USER_AGENTS.length];
+  return {
+    'User-Agent':ua,
+    'Referer':'https://www.viaggiatreno.it/',
+    'Origin':'https://www.viaggiatreno.it',
+    'Accept':'application/json, text/plain, */*',
+    'Accept-Language':'it-IT,it;q=0.9,en;q=0.8',
+    'Accept-Encoding':'gzip, deflate, br',
+    'Connection':'keep-alive',
+    'Sec-Fetch-Dest':'empty',
+    'Sec-Fetch-Mode':'cors',
+    'Sec-Fetch-Site':'same-origin',
+  };
+}
+const VT_H=getVT_H(); // compatibilità con codice esistente
 const SDB  ='https://www.thesportsdb.com/api/v1/json/123';
 const FD   ='https://api.football-data.org/v4';
 const FD_H ={'X-Auth-Token':'138a06978b4b4c11b8fada4a4b9247de'};
@@ -431,9 +450,12 @@ function mapPhaseByDate(dateStr, slug){
 // ── HEALTH ────────────────────────────────────────────────────────────────────
 app.get('/',(req,res)=>res.send('OK '+new Date().toISOString()));
 app.get('/cache/clear',async(req,res)=>{
-  // Svuota solo le entry Wikipedia MotoGP
-  for(const[k] of cache){if(k.includes('wikipedia')||k.includes('wiki'))cache.delete(k);}
-  res.json({cleared:true,remaining:cache.size});
+  const type=req.query.type||'all';
+  let cleared=0;
+  for(const[k] of cache){
+    if(type==='all'||k.includes(type)){cache.delete(k);cleared++;}
+  }
+  res.json({cleared,remaining:cache.size,type});
 });
 app.get('/img',async(req,res)=>{
   try{
@@ -2047,24 +2069,19 @@ app.get('/sport/soccer/cups',async(req,res)=>{
       const phaseNames=cup.phases.map(p=>p.name);
 
       // Raccoglie eventi da tutte le fonti
-      // Deduplicazione per "data_homeNorm_awayNorm" — più affidabile degli ID
-      const byMatchKey=new Map(); // key→event
-      const seenId=new Set();
-
-      function addEvent(e, sourcePriority){
+      // Deduplicazione per "data_homeNorm_awayNorm"
+      const byMatchKey=new Map();
+      const addEvent=(e,prio)=>{
         if(!e||!e.homeName||!e.awayName) return;
         const dk=(e.date||'').slice(0,10);
         const hk=e.homeName.toLowerCase().replace(/\s+/g,'').slice(0,6);
         const ak=e.awayName.toLowerCase().replace(/\s+/g,'').slice(0,6);
-        const matchKey=`${dk}_${hk}_${ak}`;
-        const existing=byMatchKey.get(matchKey);
-        // Sostituisci se nuova fonte ha priorità maggiore o dati più completi
-        if(!existing || sourcePriority > (existing._prio||0) ||
-           (e.homeScore&&!existing.homeScore)){
-          e._prio=sourcePriority;
-          byMatchKey.set(matchKey,e);
+        const key=`${dk}_${hk}_${ak}`;
+        const ex=byMatchKey.get(key);
+        if(!ex||prio>(ex._prio||0)||(e.homeScore&&!ex.homeScore)){
+          e._prio=prio; byMatchKey.set(key,e);
         }
-      }
+      };
 
       // ── FONTE 1: Football-Data.org (priorità massima — dati ufficiali) ─
       if(cup.fd){
@@ -2106,7 +2123,7 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           try{
             const d=await fetch(
               `${ESPN}/soccer/${cup.slug}/scoreboard?dates=${cfrom}-${cto}`,
-              1800000);
+              900000); // 15min cache
             for(const e of(d?.events||[])){
               const ne=normEvent(e,cup.name,cup.slug);
               if(!ne) continue;
@@ -2291,7 +2308,7 @@ async function vtFetch(tipo, id, stationTs){
       const url=`${base}/${tipo}/${id}/${ts}`;
       if(tried.has(url)) continue; tried.add(url);
       try{
-        const r=await axios.get(url,{headers:VT_H,timeout:12000,validateStatus:s=>true});
+        const r=await axios.get(url,{headers:getVT_H(),timeout:12000,validateStatus:s=>true});
         if(r.status===200){
           const raw=(r.data||'').toString().trim();
           if(raw.startsWith('<')||raw.includes('http-equiv')){errors.push(`HTML@ts=${ts}`);continue;}
@@ -2565,6 +2582,86 @@ app.get('/sport/motogp/news',async(req,res)=>{
     }
     res.json({items:items.slice(0,10)});
   }catch(e){res.status(500).json({error:e.message});}
+});
+
+
+// ── Sofascore API per coppe nazionali ────────────────────────────────────────
+async function fetchSofascore(cup){
+  if(!cup.sofaId) return [];
+  const ck=`sofa:${cup.slug}`;
+  const cached=getC(ck);
+  if(cached) return cached;
+  const events=[];
+  const seen=new Set();
+  try{
+    const headers={
+      'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      'Referer':'https://www.sofascore.com/',
+      'Accept':'application/json',
+      'Accept-Language':'it-IT,it;q=0.9',
+    };
+    // Ottieni la stagione corrente del torneo
+    let sofaSeason=cup.sofaSeason||0;
+    try{
+      const sr=await axios.get(
+        `https://api.sofascore.com/api/v1/unique-tournament/${cup.sofaId}/seasons`,
+        {headers,timeout:8000}
+      );
+      const seasons=sr.data?.seasons||[];
+      const cur=seasons.find(s=>
+        (s.year||'').includes('25/26')||
+        (s.year||'').includes('2025')||
+        (s.name||'').includes('25/26')
+      );
+      if(cur) sofaSeason=cur.id;
+      else if(seasons[0]) sofaSeason=seasons[0].id;
+    }catch{}
+    if(!sofaSeason) return [];
+    // Carica partite passate
+    for(const type of['last','next']){
+      try{
+        const r=await axios.get(
+          `https://api.sofascore.com/api/v1/unique-tournament/${cup.sofaId}/season/${sofaSeason}/events/${type}/0`,
+          {headers,timeout:10000}
+        );
+        for(const e of(r.data?.events||[])){
+          const eid=`sofa:${e.id}`;
+          if(seen.has(eid)) continue; seen.add(eid);
+          const dt=e.startTimestamp?new Date(e.startTimestamp*1000).toISOString():'';
+          const mDate=dt.replace(/-/g,'').slice(0,8);
+          const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
+          if(!phase) continue;
+          const hs=e.homeScore?.current!=null?String(e.homeScore.current):'';
+          const as_=e.awayScore?.current!=null?String(e.awayScore.current):'';
+          events.push({
+            id:eid, date:dt, league:cup.name, leagueSlug:cup.slug,
+            homeName:e.homeTeam?.name||'',
+            awayName:e.awayTeam?.name||'',
+            homeScore:hs, awayScore:as_,
+            homeId:'', awayId:'',
+            completed:e.status?.type==='finished',
+            live:e.status?.type==='inprogress',
+            clock:'', round:phase.name,
+            statusDetail:e.status?.description?.includes('penalties')?'dcr':
+                         e.status?.description?.includes('extra')?'dts':'',
+          });
+        }
+      }catch{}
+    }
+  }catch{}
+  setC(ck,events,1800000);
+  return events;
+}
+
+
+app.get('/diag/cups/debug',async(req,res)=>{
+  // Svuota cache cups e FD per forzare refresh
+  let cleared=0;
+  for(const[k] of cache){
+    if(k.includes('cups')||k.includes('/competitions/')||k.includes('sofa:')||k.includes('wiki:'))
+      {cache.delete(k);cleared++;}
+  }
+  res.json({cacheCleared:cleared,msg:'Richiedi /sport/soccer/cups per vedere i dati freschi'});
 });
 
 
