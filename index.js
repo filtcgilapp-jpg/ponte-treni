@@ -1808,7 +1808,7 @@ const CUP_CALENDARS = [
     {name:'Semifinale',              from:'20260430',to:'20260510'},
     {name:'Finale',                  from:'20260521',to:'20260522'},
   ]},
-  {slug:'uefa.conference',     name:'Conference League',       group:'Europa',       fd:'ECSL', phases:[
+  {slug:'uefa.conference',     name:'Conference League',       group:'Europa',       fd:'ECSL', sofaId:116, phases:[
     {name:'Turni di Qualificazione', from:'20250701',to:'20250829'},
     {name:'Fase Campionato',         from:'20250922',to:'20251221'},
     {name:'Spareggio',               from:'20260212',to:'20260228'},
@@ -1849,7 +1849,7 @@ const CUP_CALENDARS = [
     {name:'Primo Turno',             from:'20251031',to:'20251114'},
     {name:'Secondo Turno',           from:'20251204',to:'20251214'},
     {name:'Terzo Turno',             from:'20260108',to:'20260122'},
-    {name:'Quarto Turno',            from:'20260130',to:'20260213'},
+    {name:'Quarto Turno',            from:'20260130',to:'20260215'},
     {name:'Quinto Turno',            from:'20260224',to:'20260302'},
     {name:'Quarti di Finale',        from:'20260317',to:'20260323'},
     {name:'Semifinale',              from:'20260416',to:'20260421'},
@@ -1868,15 +1868,15 @@ const CUP_CALENDARS = [
     {name:'Primo Turno',             from:'20250814',to:'20250818'},
     {name:'Secondo Turno',           from:'20251027',to:'20251031'},
     {name:'Ottavi di Finale',        from:'20251201',to:'20251206'},
-    {name:'Quarti di Finale',        from:'20260202',to:'20260207'},
+    {name:'Quarti di Finale',        from:'20260201',to:'20260210'},
     {name:'Semifinale',              from:'20260420',to:'20260424'},
     {name:'Finale',                  from:'20260522',to:'20260524'},
   ]},
   {slug:'fra.coupe_de_france', name:'Coupe de France',         group:'Francia',      fd:'CDF',  wiki:'Coppa_di_Francia_2025-2026',    phases:[
     {name:'Turni Regionali',         from:'20250801',to:'20251130'},
     {name:'Trentaduesimi di Finale', from:'20251218',to:'20251222'},
-    {name:'Sedicesimi di Finale',    from:'20260115',to:'20260120'},
-    {name:'Ottavi di Finale',        from:'20260205',to:'20260210'},
+    {name:'Sedicesimi di Finale',    from:'20260110',to:'20260122'},
+    {name:'Ottavi di Finale',        from:'20260201',to:'20260215'},
     {name:'Quarti di Finale',        from:'20260304',to:'20260310'},
     {name:'Semifinale',              from:'20260420',to:'20260424'},
     {name:'Finale',                  from:'20260522',to:'20260524'},
@@ -2083,35 +2083,44 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         }
       };
 
-      // ── FONTE 1: Football-Data.org (priorità massima — dati ufficiali) ─
+      // ── FONTE 1: Football-Data.org (priorità massima) ────────────────
       if(cup.fd){
         try{
           const yr=new Date().getFullYear();
-          let fdData=null;
+          let allFdMatches=[];
+          // 1a: Tutti i match della stagione corrente
           for(const season of[yr-1,yr-2]){
-            // Prende TUTTE le partite: passate (FINISHED) + future (SCHEDULED, TIMED, POSTPONED)
-            fdData=await fd(`/competitions/${cup.fd}/matches?season=${season}`,3600000).catch(()=>null);
-            if(fdData?.matches?.length) break;
-          }
-          if(fdData?.matches?.length){
-            for(const m of fdData.matches){
-              const mDate=(m.utcDate||'').replace(/-/g,'').slice(0,8);
-              const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
-              if(!phase) continue;
-              addEvent({
-                id:`fd:${m.id}`, date:m.utcDate||'', league:cup.name, leagueSlug:cup.slug,
-                homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
-                awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
-                homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
-                awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
-                homeId:'',awayId:'',
-                completed:['FINISHED','AWARDED'].includes(m.status),
-                live:m.status==='IN_PLAY', clock:'',
-                round:phase.name,
-                statusDetail:m.score?.duration==='PENALTY_SHOOTOUT'?'dcr':
-                             m.score?.duration==='EXTRA_TIME'?'dts':'',
-              }, 3); // priorità 3 = massima
+            const fdData=await fd(`/competitions/${cup.fd}/matches?season=${season}`,1800000).catch(()=>null);
+            if(fdData?.matches?.length){
+              allFdMatches=fdData.matches;
+              break;
             }
+          }
+          // 1b: Partite future (SCHEDULED+TIMED) — cattura finali/semi non in stagione corrente
+          const fdSched=await fd(`/competitions/${cup.fd}/matches?status=SCHEDULED`,900000).catch(()=>null);
+          const fdTimed=await fd(`/competitions/${cup.fd}/matches?status=TIMED`,900000).catch(()=>null);
+          const existingIds=new Set(allFdMatches.map(m=>m.id));
+          for(const m of[...(fdSched?.matches||[]),...(fdTimed?.matches||[])]){
+            if(!existingIds.has(m.id)){existingIds.add(m.id);allFdMatches.push(m);}
+          }
+          // Mappa tutte le partite FD alle fasi
+          for(const m of allFdMatches){
+            const mDate=(m.utcDate||'').replace(/-/g,'').slice(0,8);
+            const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
+            if(!phase) continue;
+            addEvent({
+              id:`fd:${m.id}`, date:m.utcDate||'', league:cup.name, leagueSlug:cup.slug,
+              homeName:m.homeTeam?.shortName||m.homeTeam?.name||'',
+              awayName:m.awayTeam?.shortName||m.awayTeam?.name||'',
+              homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
+              awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
+              homeId:'',awayId:'',
+              completed:['FINISHED','AWARDED'].includes(m.status),
+              live:m.status==='IN_PLAY', clock:'',
+              round:phase.name,
+              statusDetail:m.score?.duration==='PENALTY_SHOOTOUT'?'dcr':
+                           m.score?.duration==='EXTRA_TIME'?'dts':'',
+            }, 3);
           }
         }catch{}
       }
@@ -2142,9 +2151,8 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         }catch{}
       }
 
-      // ── FONTE 4: Sofascore API (per coppe senza FD) ──────────────────
-      // Sofascore ha dati completi per tutte le coppe nazionali
-      if(!cup.fd&&cup.sofaId){
+      // ── FONTE 4: Sofascore (coppe senza FD + UECL come backup) ───────
+      if(cup.sofaId){
         try{
           const sofaEvs=await fetchSofascore(cup);
           for(const e of sofaEvs) addEvent(e, 2); // stessa priorità ESPN
