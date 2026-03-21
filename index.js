@@ -1733,128 +1733,268 @@ app.get('/sport/basketball/standings/all',async(req,res)=>{
 
 // Struttura calendario: {slug, name, group, phases: [{name, dateFrom, dateTo}]}
 // Per ogni fase facciamo UNA chiamata ESPN con il range esatto
+// ══════════════════════════════════════════════════════════════════════════════
+// COPPE 2025/26 — calendari ufficiali con fetch Wikipedia come fonte primaria
+// ══════════════════════════════════════════════════════════════════════════════
+
 const CUP_CALENDARS = [
-  // ── CHAMPIONS LEAGUE 2025/26 ────────────────────────────────────────────
-  {slug:'uefa.champions', name:'Champions League', group:'Europa', fd:'CL', phases:[
-    {name:'Turni di Qualificazione',        from:'20250701',to:'20250916'},
-    {name:'Fase Campionato',                from:'20250917',to:'20260129'},
-    {name:'Spareggio',                      from:'20260210',to:'20260227'},
-    {name:'Ottavi di Finale',               from:'20260304',to:'20260320'},
-    {name:'Quarti di Finale',               from:'20260401',to:'20260417'},
-    {name:'Semifinale',                     from:'20260428',to:'20260508'},
-    {name:'Finale',                         from:'20260527',to:'20260601'},
+  {slug:'uefa.champions',      name:'Champions League',        group:'Europa',       fd:'CL',   phases:[
+    {name:'Turni di Qualificazione', from:'20250701',to:'20250916'},
+    {name:'Fase Campionato',         from:'20250917',to:'20260129'},
+    {name:'Spareggio',               from:'20260210',to:'20260227'},
+    {name:'Ottavi di Finale',        from:'20260304',to:'20260320'},
+    {name:'Quarti di Finale',        from:'20260401',to:'20260417'},
+    {name:'Semifinale',              from:'20260428',to:'20260508'},
+    {name:'Finale',                  from:'20260527',to:'20260601'},
   ]},
-  // ── EUROPA LEAGUE 2025/26 ────────────────────────────────────────────────
-  {slug:'uefa.europa', name:'Europa League', group:'Europa', fd:'EL', phases:[
-    {name:'Turni di Qualificazione',        from:'20250701',to:'20250925'},
-    {name:'Fase Campionato',                from:'20250926',to:'20260130'},
-    {name:'Spareggio',                      from:'20260211',to:'20260227'},
-    {name:'Ottavi di Finale',               from:'20260305',to:'20260321'},
-    {name:'Quarti di Finale',               from:'20260409',to:'20260419'},
-    {name:'Semifinale',                     from:'20260430',to:'20260510'},
-    {name:'Finale',                         from:'20260521',to:'20260522'},
+  {slug:'uefa.europa',         name:'Europa League',           group:'Europa',       fd:'EL',   phases:[
+    {name:'Turni di Qualificazione', from:'20250701',to:'20250925'},
+    {name:'Fase Campionato',         from:'20250926',to:'20260130'},
+    {name:'Spareggio',               from:'20260211',to:'20260227'},
+    {name:'Ottavi di Finale',        from:'20260305',to:'20260321'},
+    {name:'Quarti di Finale',        from:'20260409',to:'20260419'},
+    {name:'Semifinale',              from:'20260430',to:'20260510'},
+    {name:'Finale',                  from:'20260521',to:'20260522'},
   ]},
-  // ── CONFERENCE LEAGUE 2025/26 ────────────────────────────────────────────
-  {slug:'uefa.conference', name:'Conference League', group:'Europa', fd:'ECSL', phases:[
-    {name:'Primo Turno Qualificazione',     from:'20250710',to:'20250718'},
-    {name:'Secondo Turno Qualificazione',   from:'20250724',to:'20250801'},
-    {name:'Terzo Turno Qualificazione',     from:'20250807',to:'20250815'},
-    {name:'Play-off Qualificazione',        from:'20250820',to:'20250829'},
-    {name:'Fase Campionato',                from:'20250922',to:'20251221'},
-    {name:'Spareggio',                      from:'20260212',to:'20260228'},
-    {name:'Sedicesimi di Finale',           from:'20260305',to:'20260321'},
-    {name:'Quarti di Finale',               from:'20260409',to:'20260419'},
-    {name:'Semifinale',                     from:'20260430',to:'20260510'},
-    {name:'Finale',                         from:'20260526',to:'20260528'},
+  {slug:'uefa.conference',     name:'Conference League',       group:'Europa',       fd:'ECSL', phases:[
+    {name:'Turni di Qualificazione', from:'20250701',to:'20250829'},
+    {name:'Fase Campionato',         from:'20250922',to:'20251221'},
+    {name:'Spareggio',               from:'20260212',to:'20260228'},
+    {name:'Sedicesimi di Finale',    from:'20260305',to:'20260321'},
+    {name:'Quarti di Finale',        from:'20260409',to:'20260419'},
+    {name:'Semifinale',              from:'20260430',to:'20260510'},
+    {name:'Finale',                  from:'20260526',to:'20260528'},
   ]},
-  // ── UEFA SUPER CUP ───────────────────────────────────────────────────────
-  {slug:'uefa.super_cup', name:'UEFA Super Cup', group:'Europa', fd:null, phases:[
-    {name:'Partita',                        from:'20250812',to:'20250814'},
+  {slug:'uefa.super_cup',      name:'Supercoppa UEFA',         group:'Europa',       fd:null,   phases:[
+    {name:'Finale',                  from:'20250812',to:'20250814'},
   ]},
-  // ── COPPA ITALIA 2025/26 ─────────────────────────────────────────────────
-  // Fonte: Lega Serie A
-  {slug:'ita.coppa_italia', name:'Coppa Italia', group:'Italia', fd:null, phases:[
-    {name:'Turno Preliminare',              from:'20250808',to:'20250812'},
-    {name:'Trentaduesimi di Finale',        from:'20250814',to:'20250820'},
-    {name:'Sedicesimi di Finale',           from:'20250921',to:'20250927'},
-    {name:'Ottavi di Finale',               from:'20251128',to:'20260128'},
-    {name:'Quarti di Finale',               from:'20260201',to:'20260215'},
-    {name:'Semifinale',                     from:'20260228',to:'20260425'},
-    {name:'Finale',                         from:'20260511',to:'20260515'},
+  {slug:'ita.coppa_italia',    name:'Coppa Italia',            group:'Italia',       fd:null,   wiki:'Coppa_Italia_2025-2026',       phases:[
+    {name:'Turno Preliminare',       from:'20250809',to:'20250811'},
+    {name:'Trentaduesimi di Finale', from:'20250815',to:'20250819'},
+    {name:'Sedicesimi di Finale',    from:'20250922',to:'20250926'},
+    {name:'Ottavi di Finale',        from:'20251128',to:'20260122'},
+    {name:'Quarti di Finale',        from:'20260203',to:'20260213'},
+    {name:'Semifinale',              from:'20260302',to:'20260425'},
+    {name:'Finale',                  from:'20260513',to:'20260514'},
   ]},
-  // ── SUPERCOPPA ITALIANA ──────────────────────────────────────────────────
-  {slug:'ita.super_cup', name:'Supercoppa Italiana', group:'Italia', fd:null, phases:[
-    {name:'Partita',                        from:'20260101',to:'20260120'},
+  {slug:'ita.super_cup',       name:'Supercoppa Italiana',     group:'Italia',       fd:null,   phases:[
+    {name:'Finale',                  from:'20260101',to:'20260120'},
   ]},
-  // ── COPA DEL REY 2025/26 ─────────────────────────────────────────────────
-  // Fonte: RFEF
-  {slug:'esp.copa_del_rey', name:'Copa del Rey', group:'Spagna', fd:null, phases:[
-    {name:'Turno Preliminare',              from:'20250824',to:'20250830'},
-    {name:'Primo Turno',                    from:'20251023',to:'20251028'},
-    {name:'Sedicesimi di Finale',           from:'20251128',to:'20251207'},
-    {name:'Ottavi di Finale',               from:'20260101',to:'20260110'},
-    {name:'Quarti di Finale',               from:'20260201',to:'20260208'},
-    {name:'Semifinale',                     from:'20260215',to:'20260410'},
-    {name:'Finale',                         from:'20260424',to:'20260427'},
+  {slug:'esp.copa_del_rey',    name:'Copa del Rey',            group:'Spagna',       fd:null,   wiki:'Copa_del_Rey_2025-26',          phases:[
+    {name:'Turno Preliminare',       from:'20250826',to:'20250829'},
+    {name:'Primo Turno',             from:'20251022',to:'20251025'},
+    {name:'Sedicesimi di Finale',    from:'20251126',to:'20251130'},
+    {name:'Ottavi di Finale',        from:'20260102',to:'20260109'},
+    {name:'Quarti di Finale',        from:'20260113',to:'20260123'},
+    {name:'Semifinale',              from:'20260218',to:'20260411'},
+    {name:'Finale',                  from:'20260425',to:'20260427'},
   ]},
-  // ── SUPERCOPPA SPAGNOLA ──────────────────────────────────────────────────
-  {slug:'esp.super_cup', name:'Supercoppa Spagnola', group:'Spagna', fd:null, phases:[
-    {name:'Partita',                        from:'20260109',to:'20260113'},
+  {slug:'esp.super_cup',       name:'Supercoppa Spagnola',     group:'Spagna',       fd:null,   phases:[
+    {name:'Partita',                 from:'20260108',to:'20260113'},
   ]},
-  // ── FA CUP 2025/26 ───────────────────────────────────────────────────────
-  // Fonte: The FA
-  {slug:'eng.fa', name:'FA Cup', group:'Inghilterra', fd:'FAC', phases:[
-    {name:'Turni di Qualificazione',        from:'20250801',to:'20251031'},
-    {name:'Primo Turno',                    from:'20251031',to:'20251116'},
-    {name:'Secondo Turno',                  from:'20251204',to:'20251218'},
-    {name:'Terzo Turno',                    from:'20260107',to:'20260122'},
-    {name:'Quarto Turno',                   from:'20260128',to:'20260213'},
-    {name:'Quinto Turno',                   from:'20260224',to:'20260304'},
-    {name:'Quarti di Finale',               from:'20260317',to:'20260324'},
-    {name:'Semifinale',                     from:'20260416',to:'20260421'},
-    {name:'Finale',                         from:'20260514',to:'20260518'},
+  {slug:'eng.fa',              name:'FA Cup',                  group:'Inghilterra',  fd:'FAC',  wiki:'2025-26_FA_Cup',                phases:[
+    {name:'Turni di Qualificazione', from:'20250801',to:'20251030'},
+    {name:'Primo Turno',             from:'20251031',to:'20251114'},
+    {name:'Secondo Turno',           from:'20251204',to:'20251214'},
+    {name:'Terzo Turno',             from:'20260108',to:'20260122'},
+    {name:'Quarto Turno',            from:'20260130',to:'20260213'},
+    {name:'Quinto Turno',            from:'20260224',to:'20260302'},
+    {name:'Quarti di Finale',        from:'20260317',to:'20260323'},
+    {name:'Semifinale',              from:'20260416',to:'20260421'},
+    {name:'Finale',                  from:'20260515',to:'20260517'},
   ]},
-  // ── EFL CUP (CARABAO CUP) 2025/26 ───────────────────────────────────────
-  // Fonte: EFL
-  {slug:'eng.league_cup', name:'EFL Cup (Carabao Cup)', group:'Inghilterra', fd:null, phases:[
-    {name:'Primo Turno',                    from:'20250812',to:'20250816'},
-    {name:'Secondo Turno',                  from:'20250826',to:'20250830'},
-    {name:'Terzo Turno',                    from:'20250916',to:'20250920'},
-    {name:'Quarto Turno',                   from:'20251028',to:'20251031'},
-    {name:'Quarti di Finale',               from:'20251216',to:'20251220'},
-    {name:'Semifinale',                     from:'20260106',to:'20260124'},
-    {name:'Finale',                         from:'20260221',to:'20260223'},
+  {slug:'eng.league_cup',      name:'EFL Cup (Carabao Cup)',   group:'Inghilterra',  fd:null,   wiki:'2025-26_EFL_Cup',               phases:[
+    {name:'Primo Turno',             from:'20250812',to:'20250815'},
+    {name:'Secondo Turno',           from:'20250826',to:'20250829'},
+    {name:'Terzo Turno',             from:'20250916',to:'20250919'},
+    {name:'Quarto Turno',            from:'20251028',to:'20251031'},
+    {name:'Quarti di Finale',        from:'20251216',to:'20251219'},
+    {name:'Semifinale',              from:'20260106',to:'20260123'},
+    {name:'Finale',                  from:'20260221',to:'20260223'},
   ]},
-  // ── DFB POKAL 2025/26 ────────────────────────────────────────────────────
-  // Fonte: DFB
-  {slug:'ger.dfb_pokal', name:'DFB Pokal', group:'Germania', fd:'DFB', phases:[
-    {name:'Primo Turno',                    from:'20250814',to:'20250820'},
-    {name:'Secondo Turno',                  from:'20251027',to:'20251031'},
-    {name:'Ottavi di Finale',               from:'20251201',to:'20251206'},
-    {name:'Quarti di Finale',               from:'20260203',to:'20260207'},
-    {name:'Semifinale',                     from:'20260419',to:'20260424'},
-    {name:'Finale',                         from:'20260522',to:'20260524'},
+  {slug:'ger.dfb_pokal',       name:'DFB Pokal',               group:'Germania',     fd:'DFB',  wiki:'DFB-Pokal_2025/26',            phases:[
+    {name:'Primo Turno',             from:'20250814',to:'20250818'},
+    {name:'Secondo Turno',           from:'20251027',to:'20251031'},
+    {name:'Ottavi di Finale',        from:'20251201',to:'20251206'},
+    {name:'Quarti di Finale',        from:'20260202',to:'20260207'},
+    {name:'Semifinale',              from:'20260420',to:'20260424'},
+    {name:'Finale',                  from:'20260522',to:'20260524'},
   ]},
-  // ── COUPE DE FRANCE 2025/26 ──────────────────────────────────────────────
-  // Fonte: FFF
-  {slug:'fra.coupe_de_france', name:'Coupe de France', group:'Francia', fd:'CDF', phases:[
-    {name:'Turni Regionali',                from:'20250801',to:'20251201'},
-    {name:'Trentaduesimi di Finale',        from:'20251211',to:'20251216'},
-    {name:'Sedicesimi di Finale',           from:'20260115',to:'20260120'},
-    {name:'Ottavi di Finale',               from:'20260204',to:'20260210'},
-    {name:'Quarti di Finale',               from:'20260304',to:'20260311'},
-    {name:'Semifinale',                     from:'20260420',to:'20260424'},
-    {name:'Finale',                         from:'20260521',to:'20260525'},
+  {slug:'fra.coupe_de_france', name:'Coupe de France',         group:'Francia',      fd:'CDF',  wiki:'Coppa_di_Francia_2025-2026',    phases:[
+    {name:'Turni Regionali',         from:'20250801',to:'20251130'},
+    {name:'Trentaduesimi di Finale', from:'20251218',to:'20251222'},
+    {name:'Sedicesimi di Finale',    from:'20260115',to:'20260120'},
+    {name:'Ottavi di Finale',        from:'20260205',to:'20260210'},
+    {name:'Quarti di Finale',        from:'20260304',to:'20260310'},
+    {name:'Semifinale',              from:'20260420',to:'20260424'},
+    {name:'Finale',                  from:'20260522',to:'20260524'},
   ]},
 ];
 
+// ── Wikipedia wikitext parser ─────────────────────────────────────────────────
+// Legge la pagina Wikipedia e restituisce partite strutturate
+const wikiMatchCache = new Map();
+
+async function fetchWikiMatches(cup) {
+  if (!cup.wiki) return [];
+  const ck = `wiki:${cup.slug}`;
+  const cached = getC(ck);
+  if (cached) return cached;
+
+  try {
+    // Prova Wikipedia italiano poi inglese
+    const langs = cup.wiki.includes('Coppa_di_Francia') || cup.wiki.includes('Coppa_Italia')
+      ? ['it','en'] : ['en','it'];
+    for (const lang of langs) {
+      try {
+        const url = `https://${lang}.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(cup.wiki)}&prop=wikitext&format=json`;
+        const r = await axios.get(url, {timeout:12000, headers:{'User-Agent':'Mozilla/5.0 (compatible; bot/1.0)'}});
+        const wt = r.data?.parse?.wikitext?.['*'] || '';
+        if (!wt || wt.length < 100) continue;
+        const matches = parseWikitext(wt, cup);
+        if (matches.length > 0) {
+          setC(ck, matches, 3600000); // cache 1h
+          return matches;
+        }
+      } catch {}
+    }
+  } catch {}
+  setC(ck, [], 1800000);
+  return [];
+}
+
+function parseWikitext(wt, cup) {
+  const matches = [];
+  const phaseNames = cup.phases.map(p => p.name);
+
+  const monthsIT = {gennaio:1,febbraio:2,marzo:3,aprile:4,maggio:5,giugno:6,
+    luglio:7,agosto:8,settembre:9,ottobre:10,novembre:11,dicembre:12};
+  const monthsEN = {january:1,february:2,march:3,april:4,may:5,june:6,
+    july:7,august:8,september:9,october:10,november:11,december:12};
+
+  // Rimuovi template complessi ma preserva testo
+  const clean = s => s
+    .replace(/\[\[([^|\]]+)\|([^\]]+)\]\]/g,'$2')  // [[link|testo]] → testo
+    .replace(/\[\[([^\]]+)\]\]/g,'$1')              // [[link]] → link
+    .replace(/\{\{[^}]*\}\}/g,'')                   // {{template}}
+    .replace(/'{2,3}/g,'')                          // grassetto/corsivo
+    .replace(/<[^>]+>/g,'')                         // HTML tags
+    .replace(/&nbsp;/g,' ')
+    .trim();
+
+  const lines = wt.split('\n');
+  let currentPhase = '';
+  let currentDate = '';
+  let phaseIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Fase: titolo sezione ==Nome Fase==
+    const secM = line.match(/^(={2,4})\s*(.+?)\s*\1\s*$/);
+    if (secM) {
+      const secName = clean(secM[2]).trim();
+      // Cerca corrispondenza con le fasi del calendario
+      const matchedPhase = phaseNames.find(p =>
+        secName.toLowerCase().includes(p.toLowerCase().split(' ')[0]) ||
+        p.toLowerCase().includes(secName.toLowerCase().split(' ')[0])
+      );
+      if (matchedPhase) {
+        currentPhase = matchedPhase;
+        phaseIdx = phaseNames.indexOf(matchedPhase);
+      }
+      continue;
+    }
+
+    // Data: "19 dicembre 2025" o "19 December 2025"
+    const dateM = line.match(/(\d{1,2})\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre|january|february|march|april|may|june|july|august|september|october|november|december)\s+(202\d)/i);
+    if (dateM) {
+      const day = String(parseInt(dateM[1])).padStart(2,'0');
+      const monthName = dateM[2].toLowerCase();
+      const monthNum = monthsIT[monthName] || monthsEN[monthName] || 0;
+      if (monthNum > 0) {
+        currentDate = `${dateM[3]}-${String(monthNum).padStart(2,'0')}-${day}`;
+      }
+      continue;
+    }
+
+    // Partita: cerca pattern con risultato numerico
+    // Pattern 1: "Squadra 1 | 2 - 1 | Squadra 2"  (tabella wikitext)
+    // Pattern 2: "Squadra 1 2-1 Squadra 2"
+    // Pattern 3: {{Fb r|Home|2–1|Away}} o simili
+
+    // Template {{Fb r|...}} o {{football result|...}}
+    const fbM = line.match(/\{\{[Ff]b[_ ]r\s*\|([^|]+)\|(\d+)[–-](\d+)(?:\s*\([^)]*\))?\|([^|}\n]+)/);
+    if (fbM && currentDate && currentPhase) {
+      const home = clean(fbM[1]);
+      const hs = fbM[2], as = fbM[3];
+      const away = clean(fbM[4]);
+      if (home && away) {
+        matches.push(makeMatch(cup, home, away, hs, as, currentDate, currentPhase, matches.length));
+      }
+      continue;
+    }
+
+    // Riga di tabella con pipe: | Squadra || 2 – 1 || Altra Squadra
+    const pipeM = line.match(/^\|([^|!\n]{2,40})\s*\|\|\s*(\d+)\s*[–\-]\s*(\d+)(?:[^|]*(?:dtr?|rigori|p\.o\.|dopo i tiri)([^|]*))?\s*\|\|\s*([^|!\n]{2,40})/i);
+    if (pipeM && currentDate && currentPhase) {
+      const home = clean(pipeM[1]);
+      const hs = pipeM[2], as = pipeM[3];
+      const pens = pipeM[4] || '';
+      const away = clean(pipeM[5]);
+      if (home && away && home.length > 1 && away.length > 1) {
+        matches.push(makeMatch(cup, home, away, hs, as, currentDate, currentPhase, matches.length, pens));
+      }
+      continue;
+    }
+
+    // Formato testo semplice su una riga: "Canet Roussillon (5) 0 - 1 Montpellier (2)"
+    // Da testo incollato dall'utente
+    const textM = line.match(/^(.+?)\s+(\d+)\s*[–\-]\s*(\d+)(?:\s*\((\d+)[–\-](\d+)\s*d[pt]r?\))?\s+(.+)$/);
+    if (textM && currentDate && currentPhase) {
+      const home = clean(textM[1].replace(/\s*\(\d+\)\s*$/,''));
+      const hs = textM[2], as = textM[3];
+      const away = clean(textM[6].replace(/\s*\(\d+\)\s*$/,''));
+      if (home && away && home.length > 2 && away.length > 2 &&
+          !home.includes('=') && !home.includes('{') && !away.includes('=')) {
+        const pens = textM[4] ? `${textM[4]}-${textM[5]}` : '';
+        matches.push(makeMatch(cup, home, away, hs, as, currentDate, currentPhase, matches.length, pens));
+      }
+    }
+  }
+
+  return matches;
+}
+
+function makeMatch(cup, home, away, hs, as, date, phase, idx, pens='') {
+  return {
+    id: `wiki_${cup.slug}_${idx}`,
+    date: date + 'T14:00:00Z',
+    league: cup.name,
+    leagueSlug: cup.slug,
+    homeName: home,
+    awayName: away,
+    homeScore: hs,
+    awayScore: as,
+    homeId: '', awayId: '',
+    completed: true, live: false, clock: '',
+    round: phase,
+    statusDetail: pens ? 'dcr' : '',
+    homeScorePen: pens ? pens.split('-')[0] : '',
+    awayScorePen: pens ? pens.split('-')[1] || '' : '',
+  };
+}
+
+// ── Cups endpoint ─────────────────────────────────────────────────────────────
 app.get('/sport/soccer/cups',async(req,res)=>{
   try{
     const results=[];
+
     for(const cup of CUP_CALENDARS){
       const allEvents=[]; const seen=new Set();
+      const phaseNames=cup.phases.map(p=>p.name);
 
-      // Fetch ESPN per ogni fase con il range esatto
+      // ── 1. ESPN per ogni fase ──────────────────────────────────────────
       for(const phase of cup.phases){
         try{
           const d=await fetch(
@@ -1863,14 +2003,13 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           for(const e of(d?.events||[])){
             const ne=normEvent(e,cup.name,cup.slug);
             if(!ne||seen.has(ne.id)) continue;
-            seen.add(ne.id);
-            ne.round=phase.name; // assegna fase dal calendario
+            seen.add(ne.id); ne.round=phase.name;
             allEvents.push(ne);
           }
         }catch{}
       }
 
-      // Integra FD per CL/EL/coppe nazionali con codice FD
+      // ── 2. FD per coppe con codice (CL, EL, FA Cup, DFB, CDF) ─────────
       if(cup.fd&&(cup.slug==='uefa.champions'||cup.slug==='uefa.europa'||
          cup.slug==='eng.fa'||cup.slug==='ger.dfb_pokal'||cup.slug==='fra.coupe_de_france')){
         try{
@@ -1878,10 +2017,8 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           let fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-1}`,3600000).catch(()=>null);
           if(!fdData?.matches?.length) fdData=await fd(`/competitions/${cup.fd}/matches?season=${yr-2}`,3600000).catch(()=>null);
           if(fdData?.matches?.length){
-            // Aggiungi partite FD mancanti
             for(const m of fdData.matches){
-              const eid=`fd:${m.id}`;if(seen.has(eid))continue;
-              // Trova fase per data
+              const eid=`fd:${m.id}`; if(seen.has(eid)) continue;
               const mDate=(m.utcDate||'').replace(/-/g,'').slice(0,8);
               const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
               if(!phase) continue;
@@ -1893,14 +2030,16 @@ app.get('/sport/soccer/cups',async(req,res)=>{
                 homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
                 awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
                 homeId:'',awayId:'', completed:m.status==='FINISHED',
-                live:false, clock:'', round:phase.name, statusDetail:'',
+                live:m.status==='IN_PLAY', clock:'', round:phase.name,
+                statusDetail:m.score?.duration==='PENALTY_SHOOTOUT'?'dcr':
+                             m.score?.duration==='EXTRA_TIME'?'dts':'',
               });
             }
           }
         }catch{}
       }
 
-      // UECL: FD/ECSL come fonte aggiuntiva (ESPN spesso non ha partite)
+      // ── 3. FD per UECL ────────────────────────────────────────────────
       if(cup.slug==='uefa.conference'&&cup.fd){
         try{
           const yr=new Date().getFullYear();
@@ -1908,7 +2047,7 @@ app.get('/sport/soccer/cups',async(req,res)=>{
             const fdData=await fd(`/competitions/${cup.fd}/matches?season=${season}`,3600000).catch(()=>null);
             if(!fdData?.matches?.length) continue;
             for(const m of fdData.matches){
-              const eid=`fd:${m.id}`;if(seen.has(eid))continue;
+              const eid=`fd:${m.id}`; if(seen.has(eid)) continue;
               const mDate=(m.utcDate||'').replace(/-/g,'').slice(0,8);
               const phase=cup.phases.find(p=>mDate>=p.from&&mDate<=p.to);
               if(!phase) continue;
@@ -1920,58 +2059,60 @@ app.get('/sport/soccer/cups',async(req,res)=>{
                 homeScore:m.score?.fullTime?.home!=null?String(m.score.fullTime.home):'',
                 awayScore:m.score?.fullTime?.away!=null?String(m.score.fullTime.away):'',
                 homeId:'',awayId:'', completed:m.status==='FINISHED',
-                live:false, clock:'', round:phase.name, statusDetail:'',
+                live:false, clock:'', round:phase.name,
+                statusDetail:m.score?.duration==='PENALTY_SHOOTOUT'?'dcr':'',
               });
             }
-            // Se abbiamo trovato dati FD, non serve la stagione precedente
             if(allEvents.length>5) break;
           }
         }catch{}
       }
 
-      // Per coppe nazionali: integra con Wikipedia se ESPN ha pochi dati
-      const nationalSlugs=new Set(['ita.coppa_italia','esp.copa_del_rey',
-        'eng.fa','eng.league_cup','ger.dfb_pokal','fra.coupe_de_france']);
-      if(nationalSlugs.has(cup.slug)){
+      // ── 4. Wikipedia per coppe nazionali ──────────────────────────────
+      if(cup.wiki){
         try{
-          const wikiEvs=await fetchWikiMatches(cup.slug);
+          const wikiEvs=await fetchWikiMatches(cup);
           for(const e of wikiEvs){
             if(seen.has(e.id)) continue;
-            // Assegna nome coppa corretto
-            e.league=cup.name;
             seen.add(e.id);
             allEvents.push(e);
           }
         }catch{}
       }
 
-      // Non saltare coppe europee principali anche se ESPN non ha eventi
-      const importantSlugs=new Set(['uefa.champions','uefa.europa','uefa.conference']);
-      if(allEvents.length===0&&!importantSlugs.has(cup.slug)) continue;
-      // Per UECL senza eventi ESPN: crea sezione vuota con info
-      if(allEvents.length===0&&importantSlugs.has(cup.slug)){
+      // ── Determina se mostrare la coppa ────────────────────────────────
+      const europee=new Set(['uefa.champions','uefa.europa','uefa.conference']);
+      if(allEvents.length===0&&!europee.has(cup.slug)) continue;
+      if(allEvents.length===0&&europee.has(cup.slug)){
+        // Mostra sezione vuota con info
         results.push({
           slug:cup.slug, name:cup.name, group:cup.group,
-          phases:[{name:'Partite non disponibili',events:[]}],
+          phases:[{name:'Dati in caricamento',events:[]}],
           totalEvents:0,
         });
         continue;
       }
 
-      // Raggruppa per fase rispettando l'ordine del calendario
+      // ── Raggruppa per fase nell'ordine del calendario ─────────────────
       const phaseMap=new Map();
+      for(const ph of phaseNames) phaseMap.set(ph,[]);
       for(const e of allEvents){
-        const ph=e.round||'Partite';
-        if(!phaseMap.has(ph)) phaseMap.set(ph,[]);
-        phaseMap.get(ph).push(e);
+        const ph=e.round||'';
+        if(phaseMap.has(ph)) phaseMap.get(ph).push(e);
+        else {
+          if(!phaseMap.has(ph)) phaseMap.set(ph,[]);
+          phaseMap.get(ph).push(e);
+        }
       }
-      // Ordina secondo l'ordine delle fasi nel calendario
-      const phaseNames=cup.phases.map(p=>p.name);
+
       const phases=[...phaseMap.entries()]
+        .filter(([,evs])=>evs.length>0)
         .sort((a,b)=>{
           const ai=phaseNames.indexOf(a[0]);
           const bi=phaseNames.indexOf(b[0]);
           if(ai>=0&&bi>=0) return ai-bi;
+          if(ai>=0) return -1;
+          if(bi>=0) return 1;
           return 0;
         })
         .map(([name,evs])=>({
@@ -1981,9 +2122,12 @@ app.get('/sport/soccer/cups',async(req,res)=>{
 
       results.push({slug:cup.slug,name:cup.name,group:cup.group,phases,totalEvents:allEvents.length});
     }
+
     res.json({cups:results});
   }catch(e){res.status(500).json({error:e.message});}
 });
+
+;
 
 ;
 
@@ -2060,26 +2204,54 @@ app.get('/stazione/cerca',async(req,res)=>{
 ;
 
 // Partenze stazione
+// Helper: timestamp mezzanotte italiana (UTC+1/+2)
+function italianMidnightMs(){
+  const now=new Date();
+  // Mezzanotte ora italiana
+  const it=new Date(now.toLocaleString('en-US',{timeZone:'Europe/Rome'}));
+  it.setHours(0,0,0,0);
+  // Converti back a UTC ms
+  const diff=now.getTime()-new Date(now.toLocaleString('en-US',{timeZone:'Europe/Rome'})).getTime();
+  return it.getTime()+diff;
+}
+
+async function vtFetch(tipo, id, ts){
+  // tipo: 'partenze' o 'arrivi'
+  const errors=[];
+  for(const base of[VT,VT2]){
+    try{
+      const r=await axios.get(`${base}/${tipo}/${id}/${ts}`,
+        {headers:VT_H,timeout:15000,maxRedirects:3,responseType:'text'});
+      const raw=(r.data||'').toString().trim();
+      // Scarta HTML (meta refresh, pagina di errore)
+      if(raw.startsWith('<')||raw.includes('http-equiv')||raw.includes('<!DOCTYPE')) {
+        errors.push(`${base}: HTML response`);
+        continue;
+      }
+      if(raw.startsWith('[')){
+        try{
+          const j=JSON.parse(raw);
+          if(Array.isArray(j)) return {data:j,source:base.includes('new')?'VT2':'VT',ts};
+        }catch{}
+      }
+      // Forse axios ha già parsato il JSON
+      if(Array.isArray(r.data)) return {data:r.data,source:base.includes('new')?'VT2':'VT',ts};
+      errors.push(`${base}: unexpected format ${raw.slice(0,40)}`);
+    }catch(e){errors.push(`${base}: ${e.message.slice(0,40)}`);}
+  }
+  return {data:null,errors};
+}
+
 app.get('/stazione/:id/partenze',async(req,res)=>{
   try{
-    const id=req.params.id;
+    const id=req.params.id.trim();
     const now=Date.now();
-    let data=null; let lastRaw='';
-    for(const base of[VT,VT2]){
-      try{
-        const r=await axios.get(`${base}/partenze/${id}/${now}`,
-          {headers:VT_H,timeout:15000});
-        if(Array.isArray(r.data)){
-          data=r.data; lastRaw=`ok:${r.data.length}`; break;
-        }
-        const raw=(r.data||'').toString().trim();
-        lastRaw=raw.slice(0,80);
-        if(raw.startsWith('<')||raw.includes('refresh')) continue;
-        try{const j=JSON.parse(raw);if(Array.isArray(j)){data=j;lastRaw=`txt:${j.length}`;break;}}catch{}
-      }catch(e){lastRaw=`err:${e.message.slice(0,50)}`;}
-    }
-    if(!data) return res.json({partenze:[],debug:lastRaw});
-    const partenze=data.slice(0,30).map(t=>({
+    const midnight=italianMidnightMs();
+    // Prova con timestamp corrente e mezzanotte italiana
+    let result=await vtFetch('partenze',id,now);
+    if(!result.data) result=await vtFetch('partenze',id,midnight);
+    if(!result.data) return res.json({partenze:[],debug:JSON.stringify(result.errors||[])});
+    const partenze=(result.data).slice(0,30).map(t=>({
       numero:t.compNumeroTreno||t.numeroTreno||'',
       categoria:t.categoria||'',
       destinazione:(t.destinazione||'').toUpperCase(),
@@ -2091,30 +2263,19 @@ app.get('/stazione/:id/partenze',async(req,res)=>{
       nonPartito:!!t.nonPartito,
       cancelled:!!(t.provvedimento===1||t.tipoTreno==='CANC'),
     }));
-    res.json({partenze,debug:lastRaw});
+    res.json({partenze,debug:`${result.source}:${result.data.length}`});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
 app.get('/stazione/:id/arrivi',async(req,res)=>{
   try{
-    const id=req.params.id;
+    const id=req.params.id.trim();
     const now=Date.now();
-    let data=null; let lastRaw='';
-    for(const base of[VT,VT2]){
-      try{
-        const r=await axios.get(`${base}/arrivi/${id}/${now}`,
-          {headers:VT_H,timeout:15000});
-        if(Array.isArray(r.data)){
-          data=r.data; lastRaw=`ok:${r.data.length}`; break;
-        }
-        const raw=(r.data||'').toString().trim();
-        lastRaw=raw.slice(0,80);
-        if(raw.startsWith('<')||raw.includes('refresh')) continue;
-        try{const j=JSON.parse(raw);if(Array.isArray(j)){data=j;lastRaw=`txt:${j.length}`;break;}}catch{}
-      }catch(e){lastRaw=`err:${e.message.slice(0,50)}`;}
-    }
-    if(!data) return res.json({arrivi:[],debug:lastRaw});
-    const arrivi=data.slice(0,30).map(t=>({
+    const midnight=italianMidnightMs();
+    let result=await vtFetch('arrivi',id,now);
+    if(!result.data) result=await vtFetch('arrivi',id,midnight);
+    if(!result.data) return res.json({arrivi:[],debug:JSON.stringify(result.errors||[])});
+    const arrivi=(result.data).slice(0,30).map(t=>({
       numero:t.compNumeroTreno||t.numeroTreno||'',
       categoria:t.categoria||'',
       origine:(t.origine||'').toUpperCase(),
@@ -2125,9 +2286,11 @@ app.get('/stazione/:id/arrivi',async(req,res)=>{
       inStazione:!!t.inStazione,
       cancelled:!!(t.provvedimento===1||t.tipoTreno==='CANC'),
     }));
-    res.json({arrivi,debug:lastRaw});
+    res.json({arrivi,debug:`${result.source}:${result.data.length}`});
   }catch(e){res.status(500).json({error:e.message});}
 });
+
+;
 
 ;
 
