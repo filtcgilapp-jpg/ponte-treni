@@ -1565,26 +1565,56 @@ app.get('/sport/motogp/past',async(req,res)=>{
 app.get('/sport/motogp/live',async(req,res)=>{
   try{
     const now=new Date();
-    // Gara in corso? (±3h dalla data evento)
+    // Gara in corso? (±4h dalla data evento)
     const live=MOTOGP_2026.find(r=>{
       const d=new Date(r.dateEvent+'T12:00:00Z');
-      return Math.abs(now-d)<3*3600000;
+      return Math.abs(now-d)<4*3600000;
     });
     if(!live) return res.json({live:false});
-    // ESPN live scoreboard
+    // 1. Prova motosprint.it live timing (scraping)
+    try{
+      // Cerca pagina live motosprint per il GP corrente
+      const gpName=live.strEvent.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
+      const msUrl=`https://www.motosprint.it/live/moto-gp`;
+      const msR=await axios.get(msUrl,{timeout:8000,headers:{
+        'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0) AppleWebKit/605.1.15',
+        'Accept':'text/html',
+      }});
+      const html=(msR.data||'').toString();
+      // Cerca link alla gara corrente nella lista live
+      const linkM=html.match(/href="(\/live\/moto-gp\/[^"]+)"/i);
+      if(linkM){
+        const liveUrl=`https://www.motosprint.it${linkM[1]}`;
+        const liveR=await axios.get(liveUrl,{timeout:10000,headers:{
+          'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0) AppleWebKit/605.1.15',
+        }});
+        const liveHtml=(liveR.data||'').toString();
+        // Parsa classifica live
+        const positions=[];
+        // Pattern: pos, nome pilota, team, distacco
+        const rows=liveHtml.matchAll(/<tr[^>]*>\s*<td[^>]*>(\d+)<\/td>\s*<td[^>]*>([^<]+)<\/td>\s*<td[^>]*>([^<]+)<\/td>/g);
+        for(const row of rows){
+          positions.push({pos:parseInt(row[1]),name:row[2].trim(),team:row[3].trim()});
+          if(positions.length>=20) break;
+        }
+        if(positions.length>0){
+          return res.json({live:true,race:live.strEvent,positions,source:'motosprint'});
+        }
+      }
+    }catch{}
+    // 2. Fallback ESPN
     try{
       const dateStr=live.dateEvent.replace(/-/g,'');
       const d=await axios.get(
         `https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${dateStr}`,
-        {timeout:8000}
-      );
+        {timeout:8000});
       const comps=d.data?.events?.[0]?.competitions?.[0]?.competitors||[];
       const positions=comps.sort((a,b)=>(a.order||99)-(b.order||99)).map(c=>({
         pos:c.order,name:c.athlete?.displayName||'',team:c.team?.name||'',
       }));
-      return res.json({live:true,race:live.strEvent,positions});
+      if(positions.length>0) return res.json({live:true,race:live.strEvent,positions,source:'espn'});
     }catch{}
-    res.json({live:true,race:live.strEvent,positions:[]});
+    res.json({live:true,race:live.strEvent,positions:[],source:'none'});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1870,7 +1900,7 @@ app.get('/sport/soccer/cups',async(req,res)=>{
         }catch{}
       }
 
-      // UECL: usa sempre FD/ECSL come fonte aggiuntiva
+      // UECL: FD/ECSL come fonte aggiuntiva (ESPN spesso non ha partite)
       if(cup.slug==='uefa.conference'&&cup.fd){
         try{
           const yr=new Date().getFullYear();
@@ -1893,7 +1923,24 @@ app.get('/sport/soccer/cups',async(req,res)=>{
                 live:false, clock:'', round:phase.name, statusDetail:'',
               });
             }
-            if(allEvents.length>10) break;
+            // Se abbiamo trovato dati FD, non serve la stagione precedente
+            if(allEvents.length>5) break;
+          }
+        }catch{}
+      }
+
+      // Per coppe nazionali: integra con Wikipedia se ESPN ha pochi dati
+      const nationalSlugs=new Set(['ita.coppa_italia','esp.copa_del_rey',
+        'eng.fa','eng.league_cup','ger.dfb_pokal','fra.coupe_de_france']);
+      if(nationalSlugs.has(cup.slug)){
+        try{
+          const wikiEvs=await fetchWikiMatches(cup.slug);
+          for(const e of wikiEvs){
+            if(seen.has(e.id)) continue;
+            // Assegna nome coppa corretto
+            e.league=cup.name;
+            seen.add(e.id);
+            allEvents.push(e);
           }
         }catch{}
       }
@@ -2007,17 +2054,22 @@ app.get('/stazione/:id/partenze',async(req,res)=>{
     const id=req.params.id;
     let data=null;
     let lastRaw='';
-    // 1. API RFI iechub (monitor ufficiale RFI — non dipende da VT)
-    try{
-      const r=await axios.post('https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
-        {Arrival:false,Code:id},
-        {headers:{'Content-Type':'application/json','Accept':'application/json',
-          'Origin':'https://www.rfi.it','Referer':'https://www.rfi.it/'},
-         timeout:12000});
-      const raw=r.data;
-      const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.Transits)?raw.Transits:null);
-      if(arr){data=arr;lastRaw=`rfi:${arr.length}`;}
-    }catch(e){lastRaw=`rfi_err:${e.message.slice(0,50)}`;}
+    // 1. API RFI iechub (monitor ufficiale) — prova vari URL
+    const rfiUrls=[
+      'https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
+      'http://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
+    ];
+    for(const rfiUrl of rfiUrls){
+      try{
+        const r=await axios.post(rfiUrl,{Arrival:false,Code:id},
+          {headers:{'Content-Type':'application/json','Accept':'application/json',
+            'Origin':'https://www.rfi.it','Referer':'https://www.rfi.it/'},
+           timeout:12000,maxRedirects:5});
+        const raw=r.data;
+        const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.Transits)?raw.Transits:null);
+        if(arr&&arr.length>=0){data=arr;lastRaw=`rfi:${arr.length}`;break;}
+      }catch(e){lastRaw=`rfi_err:${e.message.slice(0,50)}`;}
+    }
     // 2. Fallback ViaggiatrEno (se RFI non risponde)
     if(!data){
       const now=Date.now();
@@ -2057,16 +2109,21 @@ app.get('/stazione/:id/arrivi',async(req,res)=>{
     let data=null;
     let lastRaw='';
     // 1. API RFI iechub
-    try{
-      const r=await axios.post('https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
-        {Arrival:true,Code:id},
-        {headers:{'Content-Type':'application/json','Accept':'application/json',
-          'Origin':'https://www.rfi.it','Referer':'https://www.rfi.it/'},
-         timeout:12000});
-      const raw=r.data;
-      const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.Transits)?raw.Transits:null);
-      if(arr){data=arr;lastRaw=`rfi:${arr.length}`;}
-    }catch(e){lastRaw=`rfi_err:${e.message.slice(0,50)}`;}
+    const rfiUrlsA=[
+      'https://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
+      'http://iechub.rfi.it/ArriviPartenze/ArrivalsDepartures/Get',
+    ];
+    for(const rfiUrl of rfiUrlsA){
+      try{
+        const r=await axios.post(rfiUrl,{Arrival:true,Code:id},
+          {headers:{'Content-Type':'application/json','Accept':'application/json',
+            'Origin':'https://www.rfi.it','Referer':'https://www.rfi.it/'},
+           timeout:12000,maxRedirects:5});
+        const raw=r.data;
+        const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.Transits)?raw.Transits:null);
+        if(arr&&arr.length>=0){data=arr;lastRaw=`rfi:${arr.length}`;break;}
+      }catch(e){lastRaw=`rfi_err:${e.message.slice(0,50)}`;}
+    }
     // 2. Fallback VT
     if(!data){
       const now=Date.now();
@@ -2131,6 +2188,89 @@ app.get('/diag/stazione/:id',async(req,res)=>{
   }
   res.json(results);
 });
+
+// ── Wikipedia parser per coppe nazionali ─────────────────────────────────────
+// Legge la pagina Wikipedia della coppa e parsa i risultati
+const WIKI_CUP_PAGES={
+  'fra.coupe_de_france': 'Coppa_di_Francia_2025-2026',
+  'ita.coppa_italia':    'Coppa_Italia_2025-2026',
+  'esp.copa_del_rey':    'Copa_del_Rey_2025-26',
+  'eng.fa':              '2025-26_FA_Cup',
+  'ger.dfb_pokal':       'DFB-Pokal_2025/26',
+  'eng.league_cup':      '2025-26_EFL_Cup',
+};
+
+async function fetchWikiMatches(slug){
+  const page=WIKI_CUP_PAGES[slug];
+  if(!page) return [];
+  try{
+    const url=`https://it.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(page)}&prop=wikitext&format=json&origin=*`;
+    const r=await axios.get(url,{timeout:15000,headers:{'User-Agent':'Mozilla/5.0 (compatible; bot)'}});
+    const wt=r.data?.parse?.wikitext?.['*']||'';
+    if(!wt) return [];
+    return parseWikiMatches(wt, slug);
+  }catch{return [];}
+}
+
+function parseWikiMatches(wt, slug){
+  const matches=[];
+  // Pattern per partite Wikipedia italiano: "DD mese AAAA\nSquadra A X - Y Squadra B"
+  // Cerca righe con risultati: "0 - 1", "2 - 0", "1 - 1 (X-Y dtr)" ecc.
+  const months={gennaio:1,febbraio:2,marzo:3,aprile:4,maggio:5,giugno:6,
+    luglio:7,agosto:8,settembre:9,ottobre:10,novembre:11,dicembre:12};
+  
+  let currentDate='';
+  let currentPhase='';
+  const lines=wt.split('\n');
+  
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i].trim();
+    
+    // Rileva fase (titolo sezione)
+    const phaseM=line.match(/^==+\s*([^=]+?)\s*==+$/);
+    if(phaseM){
+      currentPhase=phaseM[1].trim()
+        .replace(/\[\[[^\]]+\]\]/g,'').replace(/[{}|]/g,'').trim();
+      continue;
+    }
+    
+    // Rileva data
+    const dateM=line.match(/(\d{1,2})\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\s+(202[0-9])/i);
+    if(dateM){
+      const d=String(parseInt(dateM[1])).padStart(2,'0');
+      const m=String(months[dateM[2].toLowerCase()]).padStart(2,'0');
+      currentDate=`${dateM[3]}-${m}-${d}`;
+      continue;
+    }
+    
+    // Rileva risultato: cerca pattern "SQUADRA X - Y SQUADRA" o "SQUADRA X-Y SQUADRA"
+    // Wikipedia usa template {{Fb r|home|score|away}} o testo diretto
+    const scoreM=line.match(/\|([^|]+?)\|(\d+)\s*[–-]\s*(\d+)(?:\s*\(([\d-]+)\s*d[pt]r?\))?\|([^|]+)/);
+    if(scoreM&&currentDate){
+      const home=scoreM[1].replace(/\[\[([^|\]]+)(?:\|[^\]]+)?\]\]/g,'$1').replace(/[{}]/g,'').trim();
+      const hs=scoreM[2], as=scoreM[3];
+      const pens=scoreM[4]||'';
+      const away=scoreM[5].replace(/\[\[([^|\]]+)(?:\|[^\]]+)?\]\]/g,'$1').replace(/[{}]/g,'').trim();
+      if(home&&away&&home.length>1&&away.length>1){
+        const statusDetail=pens?'dcr':'';
+        matches.push({
+          id:`wiki_${slug}_${matches.length}`,
+          date:currentDate+'T12:00:00Z',
+          league:slug, leagueSlug:slug,
+          homeName:home, awayName:away,
+          homeScore:hs, awayScore:as,
+          homeId:'',awayId:'',
+          completed:true, live:false, clock:'',
+          round:currentPhase, statusDetail,
+          homeScorePen:pens?pens.split('-')[0]:'',
+          awayScorePen:pens?pens.split('-')[1]||'':'',
+        });
+      }
+    }
+  }
+  return matches;
+}
+
 
 const PORT=process.env.PORT||10000;
 // ══════════════════════════════════════════════════════════════════════════════
