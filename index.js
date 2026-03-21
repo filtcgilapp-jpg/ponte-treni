@@ -2072,7 +2072,8 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           const yr=new Date().getFullYear();
           let fdData=null;
           for(const season of[yr-1,yr-2]){
-            fdData=await fd(`/competitions/${cup.fd}/matches?season=${season}&limit=200`,3600000).catch(()=>null);
+            // Prende TUTTE le partite: passate (FINISHED) + future (SCHEDULED, TIMED, POSTPONED)
+            fdData=await fd(`/competitions/${cup.fd}/matches?season=${season}`,3600000).catch(()=>null);
             if(fdData?.matches?.length) break;
           }
           if(fdData?.matches?.length){
@@ -2100,7 +2101,7 @@ app.get('/sport/soccer/cups',async(req,res)=>{
 
       // ── FONTE 2: ESPN per fase (chunk 14gg) ───────────────────────────
       for(const phase of cup.phases){
-        const chunks=dateChunks(phase.from,phase.to,14);
+        const chunks=dateChunks(phase.from,phase.to,7);
         for(const [cfrom,cto] of chunks){
           try{
             const d=await fetch(
@@ -2260,20 +2261,31 @@ function italianMidnightMs(){
 
 async function vtFetch(tipo, id, ts){
   const errors=[];
+  // Prova tutti i formati URL: con ts, senza ts, con ID alternativo
+  const idVariants=[id, id.replace(/^S0*/,'')]; // S01700 e 1700
+  const tsVariants=[ts, italianMidnightMs(), 0]; // 0 = senza timestamp
+  const tried=new Set();
   for(const base of[VT,VT2]){
-    try{
-      const r=await axios.get(`${base}/${tipo}/${id}/${ts}`,
-        {headers:VT_H,timeout:15000,validateStatus:s=>s<500});
-      const raw=(r.data||'').toString().trim();
-      if(r.status===400){errors.push(`${base}: 400 id=${id} ts=${ts}`);continue;}
-      if(r.status===301||r.status===302){errors.push(`${base}: redirect ${r.status}`);continue;}
-      if(raw.startsWith('<')||raw.includes('http-equiv')){errors.push(`${base}: HTML`);continue;}
-      if(Array.isArray(r.data)) return {data:r.data,source:base.includes('new')?'VT2':'VT',ts};
-      if(raw.startsWith('[')){
-        try{const j=JSON.parse(raw);if(Array.isArray(j))return {data:j,source:base.includes('new')?'VT2':'VT',ts};}catch{}
+    for(const vid of idVariants){
+      for(const vts of tsVariants){
+        const url=vts>0?`${base}/${tipo}/${vid}/${vts}`:`${base}/${tipo}/${vid}`;
+        if(tried.has(url)) continue; tried.add(url);
+        try{
+          const r=await axios.get(url,{headers:VT_H,timeout:12000,validateStatus:s=>true});
+          if(r.status===200){
+            const raw=(r.data||'').toString().trim();
+            if(raw.startsWith('<')||raw.includes('http-equiv')){errors.push(`HTML@${url.slice(40)}`);continue;}
+            if(Array.isArray(r.data)) return {data:r.data,source:`${base.includes('new')?'VT2':'VT'} id=${vid} ts=${vts}`,ts:vts};
+            if(raw.startsWith('[')){
+              try{const j=JSON.parse(raw);if(Array.isArray(j))return {data:j,source:`${base.includes('new')?'VT2':'VT'} id=${vid} ts=${vts}`,ts:vts};}catch{}
+            }
+            errors.push(`${r.status}@${url.slice(40)} fmt=${raw.slice(0,20)}`);
+          } else {
+            errors.push(`${r.status}@id=${vid}ts=${vts}`);
+          }
+        }catch(e){errors.push(`err@${url.slice(40)}: ${e.message.slice(0,30)}`);}
       }
-      errors.push(`${base}: status=${r.status} fmt=${raw.slice(0,30)}`);
-    }catch(e){errors.push(`${base}: ${e.message.slice(0,50)}`);}
+    }
   }
   return {data:null,errors};
 }
@@ -2466,9 +2478,9 @@ app.get('/diag/cups/:slug',async(req,res)=>{
 app.get('/sport/f1/news',async(req,res)=>{
   try{
     const feeds=[
-      'https://www.autosport.com/rss/f1/news/',
       'https://it.motorsport.com/rss/f1/news/',
-      'https://www.motorsport.com/rss/f1/news/',
+      'https://www.formulapassion.it/feed/',
+      'https://www.motorionline.com/category/formula-1/feed/',
     ];
     const items=[];
     for(const url of feeds){
@@ -2481,7 +2493,7 @@ app.get('/sport/f1/news',async(req,res)=>{
           const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\/${tag}>`,'i'));return x?x[1].trim():null;};
           const title=getTag('title'); const link=getTag('link');
           const pub=getTag('pubDate');
-          if(title&&link) items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:url.includes('autosport')?'Autosport':'Motorsport'});
+          if(title&&link) items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:url.includes('formulapassion')?'FormulaPassion':url.includes('motorionline')?'MotorOnline':'Motorsport IT'});
         }
         if(items.length>=5) break;
       }catch{}
@@ -2494,8 +2506,8 @@ app.get('/sport/motogp/news',async(req,res)=>{
   try{
     const feeds=[
       'https://it.motorsport.com/rss/motogp/news/',
-      'https://www.motorsport.com/rss/motogp/news/',
       'https://www.motosprint.it/feed/',
+      'https://www.motorionline.com/category/motogp/feed/',
     ];
     const items=[];
     for(const url of feeds){
