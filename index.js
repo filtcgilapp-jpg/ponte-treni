@@ -1934,28 +1934,49 @@ app.get('/stazione/cerca',async(req,res)=>{
   const q=(req.query.q||'').trim();
   if(q.length<2) return res.json({stazioni:[]});
   try{
-    let data='';
-    try{
-      const r=await axios.get(`${VT}/cercaStazioneAC/${encodeURIComponent(q)}`,
-        {headers:VT_H,timeout:10000,responseType:'text'});
-      data=(r.data||'').toString().trim();
-    }catch{
-      const r=await axios.get(`${VT2}/cercaStazioneAC/${encodeURIComponent(q)}`,
-        {headers:VT_H,timeout:10000,responseType:'text'});
-      data=(r.data||'').toString().trim();
-    }
-    // Risposta: JSON array [{nomeLungo:"MILANO CENTRALE", id:"S01700"}, ...]
     let stazioni=[];
-    try{ stazioni=JSON.parse(data); }catch{
-      // Fallback: formato testo "Nome|ID\n..."
-      stazioni=data.split('\n').filter(Boolean).map(line=>{
-        const parts=line.split('|');
-        return parts.length>=2?{nomeLungo:parts[0].trim(),id:parts[1].trim()}:null;
-      }).filter(Boolean);
+    // Prova tutti gli endpoint ViaggiatrEno
+    const urls=[
+      `${VT}/cercaStazioneAC/${encodeURIComponent(q)}`,
+      `${VT2}/cercaStazioneAC/${encodeURIComponent(q)}`,
+      `${VT}/autocompletaStazione/${encodeURIComponent(q)}`,
+    ];
+    for(const url of urls){
+      try{
+        const r=await axios.get(url,{headers:VT_H,timeout:10000,responseType:'text'});
+        const raw=(r.data||'').toString().trim();
+        // Scarta HTML, JS, vuoto
+        if(!raw||raw.length<3||raw.startsWith('<')||raw.startsWith('function')||raw.startsWith('//')) continue;
+        // Prova JSON
+        try{
+          const j=JSON.parse(raw);
+          if(Array.isArray(j)&&j.length>0){
+            stazioni=j.map(s=>({
+              nomeLungo:(s.nomeLungo||s.nomeStazione||s.nome||s.name||'').trim().toUpperCase(),
+              id:(s.id||s.codiceStazione||s.code||'').toString().trim(),
+            })).filter(s=>s.nomeLungo&&s.id);
+            if(stazioni.length>0) break;
+          }
+        }catch{}
+        // Formato testo: "NOME|S01700-NOME-TIMESTAMP" oppure "NOME|S01700\n"
+        const parsed=raw.split(/[\n\r]+/).filter(Boolean).map(line=>{
+          const sep=line.indexOf('|');
+          if(sep<1) return null;
+          const nome=line.slice(0,sep).trim().toUpperCase();
+          // Codice è tutto dopo | — prendi solo la parte S+cifre
+          const afterPipe=line.slice(sep+1).trim();
+          // Estrai codice stazione (formato S01700 o S01700-0)
+          const codM=afterPipe.match(/^(S\d{5})/);
+          const id=codM?codM[1]:afterPipe.split('-')[0].trim();
+          return nome&&id.length>2?{nomeLungo:nome,id}:null;
+        }).filter(Boolean);
+        if(parsed.length>0){stazioni=parsed;break;}
+      }catch{}
     }
-    res.json({stazioni:Array.isArray(stazioni)?stazioni.slice(0,10):[]});
+    res.json({stazioni:stazioni.slice(0,10)});
   }catch(e){res.status(500).json({error:e.message});}
 });
+;
 
 // Partenze stazione
 app.get('/stazione/:id/partenze',async(req,res)=>{
