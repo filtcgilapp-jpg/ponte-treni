@@ -1751,21 +1751,23 @@ async function getWikiPhasesForCup(slug){
 
 app.get('/sport/soccer/cups',async(req,res)=>{
   try{
-    // Range stagione 2025/26 — divisi in 4 blocchi trimestrali
+    // Range stagione 2025/26 — mensili per massima copertura ESPN
     const seasonRanges=[
-      '20250701-20251001',
-      '20251001-20260101',
-      '20260101-20260401',
-      '20260401-20260701',
+      '20250701-20250801','20250801-20250901','20250901-20251001',
+      '20251001-20251101','20251101-20251201','20251201-20260101',
+      '20260101-20260201','20260201-20260301','20260301-20260401',
+      '20260401-20260501','20260501-20260601','20260601-20260701',
     ];
 
-    // Range specifici per Conference League (giornate esatte UEFA)
+    // Range specifici per Conference League — stagione 2025/26 completa
+    // Include range largo per catturare tutte le partite ESPN
     const ueclRanges=[
-      '20250710-20250718','20250724-20250801','20250807-20250815','20250820-20250829',
-      '20250923-20250927','20251021-20251025','20251104-20251108',
-      '20251125-20251129','20251209-20251213','20251216-20251220',
-      '20260217-20260228','20260310-20260321','20260407-20260418',
-      '20260428-20260509','20260524-20260529',
+      // Qualificazioni luglio-agosto
+      '20250701-20250901',
+      // Fase campionato settembre-dicembre
+      '20250901-20260101',
+      // Spareggio + fasi a eliminazione gennaio-giugno
+      '20260101-20260601',
     ];
 
     const results=[];
@@ -1779,7 +1781,7 @@ app.get('/sport/soccer/cups',async(req,res)=>{
 
       for(const range of rangesToUse){
         try{
-          const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${range}`,7200000);
+          const d=await fetch(`${ESPN}/soccer/${lg.slug}/scoreboard?dates=${range}`,1800000);
           for(const e of(d?.events||[])){
             const ne=normEvent(e,lg.name,lg.slug);
             if(!ne||seen.has(ne.id)) continue;
@@ -1814,7 +1816,7 @@ app.get('/sport/soccer/cups',async(req,res)=>{
       }
 
       // ── Fallback FD per UECL ──────────────────────────────────────────
-      if(lg.slug==='uefa.conference'&&events.length<20){
+      if(lg.slug==='uefa.conference'){
         try{
           const yr=new Date().getFullYear();
           for(const season of[yr-1,yr-2]){
@@ -1987,15 +1989,17 @@ app.get('/stazione/:id/partenze',async(req,res)=>{
     let lastRaw='';
     for(const base of[VT,VT2]){
       try{
+        // Prima prova senza responseType (axios auto-parsa JSON)
         const r=await axios.get(`${base}/partenze/${id}/${now}`,
-          {headers:VT_H,timeout:12000,responseType:'text'});
+          {headers:VT_H,timeout:12000});
+        if(Array.isArray(r.data)&&r.data.length>0){data=r.data;break;}
+        if(Array.isArray(r.data)){data=r.data;lastRaw='array vuoto da VT';break;}
+        // Fallback: forza text parsing
         const raw=(r.data||'').toString().trim();
-        lastRaw=raw.slice(0,100);
+        lastRaw=raw.slice(0,120);
         if(!raw||raw.startsWith('<')||raw.startsWith('function')) continue;
         try{ const j=JSON.parse(raw); if(Array.isArray(j)){data=j;break;} }catch{}
-        // Se l'array arriva come stringa vuota o null
-        if(raw==='null'||raw==='[]') {data=[];break;}
-      }catch{}
+      }catch(e){lastRaw=`err:${e.message}`;}
     }
     if(!data) return res.json({partenze:[],debug:lastRaw});
     if(data.length===0) return res.json({partenze:[],debug:'array vuoto'});
@@ -2025,13 +2029,14 @@ app.get('/stazione/:id/arrivi',async(req,res)=>{
     for(const base of[VT,VT2]){
       try{
         const r=await axios.get(`${base}/arrivi/${id}/${now}`,
-          {headers:VT_H,timeout:12000,responseType:'text'});
+          {headers:VT_H,timeout:12000});
+        if(Array.isArray(r.data)&&r.data.length>0){data=r.data;break;}
+        if(Array.isArray(r.data)){data=r.data;lastRaw='array vuoto da VT';break;}
         const raw=(r.data||'').toString().trim();
-        lastRaw=raw.slice(0,100);
+        lastRaw=raw.slice(0,120);
         if(!raw||raw.startsWith('<')||raw.startsWith('function')) continue;
         try{ const j=JSON.parse(raw); if(Array.isArray(j)){data=j;break;} }catch{}
-        if(raw==='null'||raw==='[]') {data=[];break;}
-      }catch{}
+      }catch(e){lastRaw=`err:${e.message}`;}
     }
     if(!data) return res.json({arrivi:[],debug:lastRaw});
     if(data.length===0) return res.json({arrivi:[],debug:'array vuoto'});
