@@ -1862,7 +1862,7 @@ const CUP_CALENDARS = [
     {name:'Quarto Turno',            from:'20251028',to:'20251031'},
     {name:'Quarti di Finale',        from:'20251216',to:'20251219'},
     {name:'Semifinale',              from:'20260106',to:'20260123'},
-    {name:'Finale',                  from:'20260221',to:'20260223'},
+    {name:'Finale',                  from:'20260309',to:'20260317'},
   ]},
   {slug:'ger.dfb_pokal',       name:'DFB Pokal',               group:'Germania',     fd:'DFB',  wiki:'DFB-Pokal_2025/26',            phases:[
     {name:'Primo Turno',             from:'20250814',to:'20250818'},
@@ -2096,12 +2096,16 @@ app.get('/sport/soccer/cups',async(req,res)=>{
               break;
             }
           }
-          // 1b: Partite future (SCHEDULED+TIMED) — cattura finali/semi non in stagione corrente
-          const fdSched=await fd(`/competitions/${cup.fd}/matches?status=SCHEDULED`,900000).catch(()=>null);
-          const fdTimed=await fd(`/competitions/${cup.fd}/matches?status=TIMED`,900000).catch(()=>null);
+          // 1b: Partite per stato — SCHEDULED (future), TIMED, e FINISHED recenti
+          const fdStatuses=['SCHEDULED','TIMED','FINISHED'];
           const existingIds=new Set(allFdMatches.map(m=>m.id));
-          for(const m of[...(fdSched?.matches||[]),...(fdTimed?.matches||[])]){
-            if(!existingIds.has(m.id)){existingIds.add(m.id);allFdMatches.push(m);}
+          for(const status of fdStatuses){
+            try{
+              const fdSt=await fd(`/competitions/${cup.fd}/matches?status=${status}`,900000).catch(()=>null);
+              for(const m of(fdSt?.matches||[])){
+                if(!existingIds.has(m.id)){existingIds.add(m.id);allFdMatches.push(m);}
+              }
+            }catch{}
           }
           // Mappa tutte le partite FD alle fasi
           for(const m of allFdMatches){
@@ -2367,7 +2371,12 @@ app.get('/stazione/:id/partenze',async(req,res)=>{
       result=await vtFetch('partenze',id,ts);
       if(result.data) break;
     }
-    if(!result.data) return res.json({partenze:[],debug:JSON.stringify(result.errors||[])});
+    if(!result.data) return res.json({
+      partenze:[],
+      debug:JSON.stringify(result.errors||[]),
+      vtUrl:`https://www.viaggiatreno.it/infomobilita/index.jsp#!/cercaStazione/${encodeURIComponent(req.params.id)}`,
+      message:'ViaggiatrEno blocca le richieste da server cloud. Apri il tabellone ufficiale.'
+    });
     const partenze=(result.data).slice(0,30).map(t=>({
       numero:t.compNumeroTreno||t.numeroTreno||'',
       categoria:t.categoria||'',
@@ -2396,7 +2405,12 @@ app.get('/stazione/:id/arrivi',async(req,res)=>{
       result=await vtFetch('arrivi',id,ts);
       if(result.data) break;
     }
-    if(!result.data) return res.json({arrivi:[],debug:JSON.stringify(result.errors||[])});
+    if(!result.data) return res.json({
+      arrivi:[],
+      debug:JSON.stringify(result.errors||[]),
+      vtUrl:`https://www.viaggiatreno.it/infomobilita/index.jsp#!/cercaStazione/${encodeURIComponent(req.params.id)}`,
+      message:'ViaggiatrEno blocca le richieste da server cloud. Apri il tabellone ufficiale.'
+    });
     const arrivi=(result.data).slice(0,30).map(t=>({
       numero:t.compNumeroTreno||t.numeroTreno||'',
       categoria:t.categoria||'',
