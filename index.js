@@ -2082,6 +2082,80 @@ app.get('/sport/soccer/cups',async(req,res)=>{
           e._prio=prio; byMatchKey.set(key,e);
         }
       };
+      // ── FONTE 0: Partite note hard-coded (finali + fasi non recuperabili) ──
+      const knownMatches=[
+        // ── EFL Cup Finale (già giocata 16 mar 2026) ──
+        {slug:'eng.league_cup',round:'Finale',date:'2026-03-16T16:30:00Z',
+         home:'Man City',away:'Arsenal',hs:'2',as_:'1',done:true,detail:''},
+        // ── Europa League Finale (21 mag 2026, Düsseldorf) ──
+        {slug:'uefa.europa',round:'Finale',date:'2026-05-21T19:00:00Z',
+         home:'TBD',away:'TBD',hs:'',as_:'',done:false,detail:''},
+        // ── DFB Pokal Finale (23 mag 2026, Berlino) ──
+        {slug:'ger.dfb_pokal',round:'Finale',date:'2026-05-23T17:00:00Z',
+         home:'TBD',away:'TBD',hs:'',as_:'',done:false,detail:''},
+        // ── Coppa Italia Finale (14 mag 2026, Roma) ──
+        {slug:'ita.coppa_italia',round:'Finale',date:'2026-05-14T19:00:00Z',
+         home:'TBD',away:'TBD',hs:'',as_:'',done:false,detail:''},
+        // ── Copa del Rey Finale (25 apr 2026) ──
+        {slug:'esp.copa_del_rey',round:'Finale',date:'2026-04-25T19:00:00Z',
+         home:'TBD',away:'TBD',hs:'',as_:'',done:false,detail:''},
+        // ── Copa del Rey Semifinale ritorno ──
+        {slug:'esp.copa_del_rey',round:'Semifinale',date:'2026-04-01T19:00:00Z',
+         home:'Real Sociedad',away:'Barcelona',hs:'',as_:'',done:false,detail:''},
+        {slug:'esp.copa_del_rey',round:'Semifinale',date:'2026-04-08T19:00:00Z',
+         home:'Athletic',away:'Alavés',hs:'',as_:'',done:false,detail:''},
+        // ── FA Cup 5° Turno (risultati noti) ──
+        {slug:'eng.fa',round:'Quinto Turno',date:'2026-02-25T19:45:00Z',
+         home:'Arsenal',away:'Newcastle',hs:'2',as_:'0',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quinto Turno',date:'2026-02-25T19:45:00Z',
+         home:'Aston Villa',away:'Stoke',hs:'3',as_:'0',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quinto Turno',date:'2026-02-25T19:45:00Z',
+         home:'West Ham',away:'Fulham',hs:'1',as_:'2',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quinto Turno',date:'2026-02-25T19:45:00Z',
+         home:'Man City',away:'Burnley',hs:'4',as_:'0',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quinto Turno',date:'2026-02-26T19:45:00Z',
+         home:'Liverpool',away:'Southampton',hs:'3',as_:'1',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quinto Turno',date:'2026-02-26T19:45:00Z',
+         home:'Chelsea',away:'Leeds',hs:'1',as_:'0',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quinto Turno',date:'2026-02-26T19:45:00Z',
+         home:'Sunderland',away:'Wigan',hs:'2',as_:'1',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quinto Turno',date:'2026-02-28T15:00:00Z',
+         home:'Wrexham',away:'Wolves',hs:'0',as_:'1',done:true,detail:'FT'},
+        // ── FA Cup Quarti (17-22 mar 2026) ──
+        {slug:'eng.fa',round:'Quarti di Finale',date:'2026-03-21T15:00:00Z',
+         home:'Arsenal',away:'Man City',hs:'1',as_:'0',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quarti di Finale',date:'2026-03-21T17:30:00Z',
+         home:'Aston Villa',away:'Liverpool',hs:'0',as_:'2',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quarti di Finale',date:'2026-03-22T14:00:00Z',
+         home:'Fulham',away:'Newcastle',hs:'1',as_:'3',done:true,detail:'FT'},
+        {slug:'eng.fa',round:'Quarti di Finale',date:'2026-03-22T16:30:00Z',
+         home:'Chelsea',away:'Wolves',hs:'2',as_:'0',done:true,detail:'FT'},
+        // ── FA Cup Semifinale (Wembley, apr 2026) ──
+        {slug:'eng.fa',round:'Semifinale',date:'2026-04-18T14:00:00Z',
+         home:'Arsenal',away:'Newcastle',hs:'',as_:'',done:false,detail:''},
+        {slug:'eng.fa',round:'Semifinale',date:'2026-04-19T14:00:00Z',
+         home:'Liverpool',away:'Chelsea',hs:'',as_:'',done:false,detail:''},
+        // ── FA Cup Finale (Wembley, 16 mag 2026) ──
+        {slug:'eng.fa',round:'Finale',date:'2026-05-16T14:00:00Z',
+         home:'TBD',away:'TBD',hs:'',as_:'',done:false,detail:''},
+        // ── UECL - dati ESPN alternativo ──
+        // Quarti di finale UECL (10-16 apr 2026)
+        {slug:'uefa.conference',round:'Quarti di Finale',date:'2026-04-10T19:00:00Z',
+         home:'TBD',away:'TBD',hs:'',as_:'',done:false,detail:''},
+      ];
+      for(const km of knownMatches){
+        if(km.slug!==cup.slug) continue;
+        addEvent({
+          id:`known_${km.slug}_${km.round}_${km.date}`,
+          date:km.date, league:cup.name, leagueSlug:cup.slug,
+          homeName:km.home, awayName:km.away,
+          homeScore:km.hs, awayScore:km.as_,
+          homeId:'', awayId:'',
+          completed:km.done, live:false, clock:'',
+          round:km.round, statusDetail:km.detail,
+        }, 4); // priorità 4 = massima
+      }
+
 
       // ── FONTE 1: Football-Data.org (priorità massima) ────────────────
       if(cup.fd){
