@@ -1500,26 +1500,26 @@ app.get('/sport/motogp/table',async(req,res)=>{
         if(standings.length>0) return res.json({table:standings,season:String(y)});
       }
     }catch{}
-    // Classifica 2026 dopo Thai GP (Round 1) — aggiornare dopo ogni gara
+    // Classifica 2026 dopo Americas GP (Round 3) — aggiornare dopo ogni gara
     return res.json({table:[
-      {intRank:'1', strTeam:'Pedro Acosta',           strNation:'KTM Factory',        intPoints:'32',intPlayed:'1'},
-      {intRank:'2', strTeam:'Marco Bezzecchi',         strNation:'Aprilia Racing',     intPoints:'27',intPlayed:'1'},
-      {intRank:'3', strTeam:'Raúl Fernández',          strNation:'Trackhouse Aprilia', intPoints:'23',intPlayed:'1'},
-      {intRank:'4', strTeam:'Jorge Martín',            strNation:'Aprilia Racing',     intPoints:'18',intPlayed:'1'},
-      {intRank:'5', strTeam:'Ai Ogura',                strNation:'Trackhouse Aprilia', intPoints:'17',intPlayed:'1'},
-      {intRank:'6', strTeam:'Brad Binder',             strNation:'Red Bull KTM',       intPoints:'13',intPlayed:'1'},
-      {intRank:'7', strTeam:'Fabio Di Giannantonio',   strNation:'Pertamina VR46',     intPoints:'12',intPlayed:'1'},
-      {intRank:'8', strTeam:'Marc Márquez',            strNation:'Ducati Lenovo',      intPoints:'9', intPlayed:'1'},
-      {intRank:'9', strTeam:'Franco Morbidelli',       strNation:'Pertamina VR46',     intPoints:'8', intPlayed:'1'},
-      {intRank:'10',strTeam:'Francesco Bagnaia',       strNation:'Ducati Lenovo',      intPoints:'8', intPlayed:'1'},
-      {intRank:'11',strTeam:'Luca Marini',             strNation:'Honda HRC',          intPoints:'6', intPlayed:'1'},
-      {intRank:'12',strTeam:'Johann Zarco',            strNation:'LCR Honda',          intPoints:'5', intPlayed:'1'},
-      {intRank:'13',strTeam:'Enea Bastianini',         strNation:'Tech3 KTM',          intPoints:'4', intPlayed:'1'},
-      {intRank:'14',strTeam:'Diogo Moreira',           strNation:'LCR Honda',          intPoints:'3', intPlayed:'1'},
-      {intRank:'15',strTeam:'Joan Mir',                strNation:'Honda HRC',          intPoints:'3', intPlayed:'1'},
-      {intRank:'16',strTeam:'Fabio Quartararo',        strNation:'Monster Yamaha',     intPoints:'2', intPlayed:'1'},
-      {intRank:'17',strTeam:'Alex Rins',               strNation:'Monster Yamaha',     intPoints:'1', intPlayed:'1'},
-    ],season:'2026',note:'dopo Thai GP R1'});
+      {intRank:'1', strTeam:'Jorge Martín',            strNation:'Aprilia Racing',     intPoints:'61',intPlayed:'3'},
+      {intRank:'2', strTeam:'Pedro Acosta',            strNation:'Red Bull KTM',       intPoints:'57',intPlayed:'3'},
+      {intRank:'3', strTeam:'Marco Bezzecchi',         strNation:'Aprilia Racing',     intPoints:'52',intPlayed:'3'},
+      {intRank:'4', strTeam:'Ai Ogura',                strNation:'Trackhouse Aprilia', intPoints:'35',intPlayed:'3'},
+      {intRank:'5', strTeam:'Raúl Fernández',          strNation:'Trackhouse Aprilia', intPoints:'34',intPlayed:'3'},
+      {intRank:'6', strTeam:'Brad Binder',             strNation:'Red Bull KTM',       intPoints:'32',intPlayed:'3'},
+      {intRank:'7', strTeam:'Marc Márquez',            strNation:'Ducati Lenovo',      intPoints:'25',intPlayed:'3'},
+      {intRank:'8', strTeam:'Fabio Di Giannantonio',   strNation:'Pertamina VR46',     intPoints:'25',intPlayed:'3'},
+      {intRank:'9', strTeam:'Francesco Bagnaia',       strNation:'Ducati Lenovo',      intPoints:'23',intPlayed:'3'},
+      {intRank:'10',strTeam:'Enea Bastianini',         strNation:'Tech3 KTM',          intPoints:'19',intPlayed:'3'},
+      {intRank:'11',strTeam:'Luca Marini',             strNation:'Honda HRC',          intPoints:'20',intPlayed:'3'},
+      {intRank:'12',strTeam:'Franco Morbidelli',       strNation:'Pertamina VR46',     intPoints:'14',intPlayed:'3'},
+      {intRank:'13',strTeam:'Johann Zarco',            strNation:'LCR Honda',          intPoints:'12',intPlayed:'3'},
+      {intRank:'14',strTeam:'Joan Mir',                strNation:'Honda HRC',          intPoints:'9', intPlayed:'3'},
+      {intRank:'15',strTeam:'Fabio Quartararo',        strNation:'Monster Yamaha',     intPoints:'5', intPlayed:'3'},
+      {intRank:'16',strTeam:'Diogo Moreira',           strNation:'LCR Honda',          intPoints:'4', intPlayed:'3'},
+      {intRank:'17',strTeam:'Alex Rins',               strNation:'Monster Yamaha',     intPoints:'2', intPlayed:'3'},
+    ],season:'2026',note:'dopo Americas GP R3'});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1559,7 +1559,7 @@ app.get('/sport/motogp/last',async(req,res)=>{
         }
       }
     }catch{}
-    // Hardcoded Thai GP 2026 (Round 1 — 1 marzo 2026)
+    // Hardcoded per round 1-3
     if(lastRace.round===1){
       return res.json({race:lastRace,results:[
         {position:'1',name:'Marco Bezzecchi',  abbr:'MB72',team:'Aprilia Racing',   points:'25'},
@@ -1574,23 +1574,52 @@ app.get('/sport/motogp/last',async(req,res)=>{
         {position:'10',name:'Maverick Viñales', abbr:'MV12',team:'GASGAS Tech3',     points:'6'},
       ]});
     }
+    if(lastRace.round===2){
+      return res.json({race:lastRace,results:[
+        {position:'1',name:'Pedro Acosta',       abbr:'PA31',team:'Red Bull KTM',      points:'25'},
+        {position:'2',name:'Jorge Martín',       abbr:'JM89',team:'Aprilia Racing',    points:'20'},
+        {position:'3',name:'Marco Bezzecchi',    abbr:'MB72',team:'Aprilia Racing',    points:'16'},
+        {position:'4',name:'Brad Binder',        abbr:'BB33',team:'Red Bull KTM',      points:'13'},
+        {position:'5',name:'Ai Ogura',           abbr:'AO79',team:'Trackhouse Aprilia',points:'11'},
+        {position:'6',name:'Raúl Fernández',     abbr:'RF25',team:'Trackhouse Aprilia',points:'10'},
+        {position:'7',name:'Marc Márquez',       abbr:'MM93',team:'Ducati Lenovo',     points:'9'},
+        {position:'8',name:'Fabio Di Giannantonio',abbr:'FD49',team:'Pertamina VR46', points:'8'},
+        {position:'9',name:'Francesco Bagnaia', abbr:'FB63',team:'Ducati Lenovo',     points:'7'},
+        {position:'10',name:'Enea Bastianini',  abbr:'EB23',team:'GASGAS Tech3',      points:'6'},
+      ]});
+    }
+    if(lastRace.round===3){
+      return res.json({race:lastRace,results:[
+        {position:'1',name:'Jorge Martín',       abbr:'JM89',team:'Aprilia Racing',    points:'25'},
+        {position:'2',name:'Pedro Acosta',       abbr:'PA31',team:'Red Bull KTM',      points:'20'},
+        {position:'3',name:'Marc Márquez',       abbr:'MM93',team:'Ducati Lenovo',     points:'16'},
+        {position:'4',name:'Ai Ogura',           abbr:'AO79',team:'Trackhouse Aprilia',points:'13'},
+        {position:'5',name:'Marco Bezzecchi',    abbr:'MB72',team:'Aprilia Racing',    points:'11'},
+        {position:'6',name:'Francesco Bagnaia', abbr:'FB63',team:'Ducati Lenovo',     points:'10'},
+        {position:'7',name:'Brad Binder',        abbr:'BB33',team:'Red Bull KTM',      points:'9'},
+        {position:'8',name:'Raúl Fernández',     abbr:'RF25',team:'Trackhouse Aprilia',points:'8'},
+        {position:'9',name:'Johann Zarco',       abbr:'JZ5', team:'LCR Honda',         points:'7'},
+        {position:'10',name:'Luca Marini',       abbr:'LM10',team:'Honda HRC',         points:'6'},
+      ]});
+    }
     res.json({race:lastRace,results:[]});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
 // ── MotoGP Gare passate stagione corrente ────────────────────────────────────
 app.get('/sport/motogp/constructors',async(req,res)=>{
-  // Classifica costruttori MotoGP 2026 dopo Thai GP R1
+  // Classifica costruttori MotoGP 2026 dopo Americas GP (R3)
   res.json({constructors:[
-    {position:'1',constructor:'Aprilia Racing',  points:'56'},
-    {position:'2',constructor:'Red Bull KTM',    points:'45'},
-    {position:'3',constructor:'Pertamina VR46',  points:'20'},
-    {position:'4',constructor:'Ducati Lenovo',   points:'17'},
-    {position:'5',constructor:'Honda HRC',       points:'9'},
-    {position:'6',constructor:'LCR Honda',       points:'8'},
-    {position:'7',constructor:'Tech3 KTM',       points:'7'},
-    {position:'8',constructor:'Monster Yamaha',  points:'3'},
-  ],season:'2026',note:'dopo Thai GP R1'});
+    {position:'1',constructor:'Aprilia Racing',   points:'120'},
+    {position:'2',constructor:'Red Bull KTM',     points:'104'},
+    {position:'3',constructor:'Trackhouse Aprilia',points:'69'},
+    {position:'4',constructor:'Ducati Lenovo',    points:'48'},
+    {position:'5',constructor:'Pertamina VR46',   points:'33'},
+    {position:'6',constructor:'Honda HRC',        points:'22'},
+    {position:'7',constructor:'Tech3 KTM',        points:'19'},
+    {position:'8',constructor:'LCR Honda',        points:'12'},
+    {position:'9',constructor:'Monster Yamaha',   points:'3'},
+  ],season:'2026',note:'dopo Americas GP R3'});
 });
 
 app.get('/sport/motogp/past',async(req,res)=>{
@@ -1599,7 +1628,7 @@ app.get('/sport/motogp/past',async(req,res)=>{
     .filter(r=>new Date(r.dateEvent)<now)
     .sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent));
   const knownResults={
-    'moto2026_1':[  // Thai GP — risultati reali
+    'moto2026_1':[  // Thai GP — risultati reali (1 mar 2026)
       {position:'1', name:'Marco Bezzecchi',      team:'Aprilia Racing',    points:'25'},
       {position:'2', name:'Pedro Acosta',          team:'Red Bull KTM',      points:'20'},
       {position:'3', name:'Raúl Fernández',        team:'Trackhouse Aprilia',points:'16'},
@@ -1610,6 +1639,30 @@ app.get('/sport/motogp/past',async(req,res)=>{
       {position:'8', name:'Luca Marini',           team:'Honda HRC',         points:'8'},
       {position:'9', name:'Enea Bastianini',       team:'Tech3 KTM',         points:'7'},
       {position:'10',name:'Franco Morbidelli',     team:'Pertamina VR46',    points:'6'},
+    ],
+    'moto2026_2':[  // Brazilian GP — risultati reali (22 mar 2026)
+      {position:'1', name:'Pedro Acosta',          team:'Red Bull KTM',      points:'25'},
+      {position:'2', name:'Jorge Martín',          team:'Aprilia Racing',    points:'20'},
+      {position:'3', name:'Marco Bezzecchi',       team:'Aprilia Racing',    points:'16'},
+      {position:'4', name:'Brad Binder',           team:'Red Bull KTM',      points:'13'},
+      {position:'5', name:'Ai Ogura',              team:'Trackhouse Aprilia',points:'11'},
+      {position:'6', name:'Raúl Fernández',        team:'Trackhouse Aprilia',points:'10'},
+      {position:'7', name:'Marc Márquez',          team:'Ducati Lenovo',     points:'9'},
+      {position:'8', name:'Fabio Di Giannantonio', team:'Pertamina VR46',    points:'8'},
+      {position:'9', name:'Francesco Bagnaia',     team:'Ducati Lenovo',     points:'7'},
+      {position:'10',name:'Enea Bastianini',       team:'Tech3 KTM',         points:'6'},
+    ],
+    'moto2026_3':[  // Americas GP — risultati reali (29 mar 2026)
+      {position:'1', name:'Jorge Martín',          team:'Aprilia Racing',    points:'25'},
+      {position:'2', name:'Pedro Acosta',          team:'Red Bull KTM',      points:'20'},
+      {position:'3', name:'Marc Márquez',          team:'Ducati Lenovo',     points:'16'},
+      {position:'4', name:'Ai Ogura',              team:'Trackhouse Aprilia',points:'13'},
+      {position:'5', name:'Marco Bezzecchi',       team:'Aprilia Racing',    points:'11'},
+      {position:'6', name:'Francesco Bagnaia',     team:'Ducati Lenovo',     points:'10'},
+      {position:'7', name:'Brad Binder',           team:'Red Bull KTM',      points:'9'},
+      {position:'8', name:'Raúl Fernández',        team:'Trackhouse Aprilia',points:'8'},
+      {position:'9', name:'Johann Zarco',          team:'LCR Honda',         points:'7'},
+      {position:'10',name:'Luca Marini',           team:'Honda HRC',         points:'6'},
     ],
   };
   const withResults=past.map(r=>({...r,results:knownResults[r.idEvent]||[]}));
