@@ -2258,6 +2258,8 @@ app.get('/sport/soccer/cups',async(req,res)=>{
 
       // ── FONTE 2: ESPN per fase (chunk 14gg) ───────────────────────────
       for(const phase of cup.phases){
+        const _phEnd=new Date(parseInt(phase.to.slice(0,4)),parseInt(phase.to.slice(4,6))-1,parseInt(phase.to.slice(6,8)));
+if((Date.now()-_phEnd.getTime())/86400000>90) continue;
         const chunks=dateChunks(phase.from,phase.to,7);
         for(const [cfrom,cto] of chunks){
           try{
