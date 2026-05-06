@@ -2360,6 +2360,156 @@ app.get('/sport/f1/race/:round/results',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPRINT RACE ENDPOINTS — aggiungere in server.js (ponte-treni)
+// Posizione: dopo l'endpoint /sport/f1/race/:round/results
+//            e prima della sezione ViaggiatrEno / stazione
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── F1 Sprint Race risultati gara singola ─────────────────────────────────────
+// Struttura risposta attesa dal client Flutter:
+//   { results: [ { position, driver, constructor, points, time }, ... ] }
+//
+// Jolpica/Ergast espone /YEAR/ROUND/sprint/results
+// Fallback: hardcoded per i round sprint 2026 noti
+app.get('/sport/f1/race/:round/sprint', async (req, res) => {
+  try {
+    const round = req.params.round;
+    // Jolpica supporta sprint results dalla stagione 2021
+    const d = await ergast(`/${F1Y}/${round}/sprint`, 300000).catch(() => null);
+    const sprintResults = d?.MRData?.RaceTable?.Races?.[0]?.SprintResults || [];
+
+    if (sprintResults.length > 0) {
+      return res.json({
+        results: sprintResults.slice(0, 20).map(r => ({
+          position: r.position,
+          driver: `${r.Driver?.givenName || ''} ${r.Driver?.familyName || ''}`.trim(),
+          constructor: r.Constructor?.name || '',
+          points: r.points || '0',
+          time: r.Time?.time || r.status || '',
+        })),
+        raceName: d?.MRData?.RaceTable?.Races?.[0]?.raceName || '',
+      });
+    }
+
+    // Hardcoded sprint 2026 — aggiornare ad ogni sprint race
+    // Il calendario 2026 prevede sprint a: Miami (R6), Austria (R11), Qatar (R23)
+    const hardcoded = {
+      // Esempio placeholder — da aggiornare con risultati reali
+      '6': { // Miami Sprint (prev. 9 mag 2026)
+        raceName: 'Miami Grand Prix Sprint',
+        results: [], // da compilare dopo la gara
+      },
+      '11': { // Austria Sprint (prev. 27 giu 2026)
+        raceName: 'Austrian Grand Prix Sprint',
+        results: [],
+      },
+      '23': { // Qatar Sprint (prev. 28 nov 2026)
+        raceName: 'Qatar Grand Prix Sprint',
+        results: [],
+      },
+    };
+
+    const hc = hardcoded[round];
+    if (hc && hc.results.length > 0) {
+      return res.json(hc);
+    }
+
+    // Nessun dato sprint per questo round → 404 (Flutter lo ignora con catchError)
+    res.status(404).json({ error: `Nessuna sprint race per round ${round}` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── MotoGP Sprint Race risultati gara singola ─────────────────────────────────
+// Struttura risposta attesa dal client Flutter:
+//   { results: [ { position, name, team, points }, ... ] }
+//
+// MotoGP ha sprint race (gara corta) ogni weekend dal 2023.
+// Fonte: hardcoded per i round noti (ESPN non ha endpoint sprint separato)
+app.get('/sport/motogp/race/:round/sprint', async (req, res) => {
+  try {
+    const round = parseInt(req.params.round) || 0;
+
+    // Risultati sprint MotoGP 2026 — da aggiornare dopo ogni gara
+    const sprintResults = {
+      1: { // Thai GP Sprint (1 mar 2026)
+        raceName: 'Thai GP Sprint',
+        results: [
+          { position: '1', name: 'Jorge Martín',           team: 'Aprilia Racing',    points: '12' },
+          { position: '2', name: 'Pedro Acosta',            team: 'Red Bull KTM',      points: '9'  },
+          { position: '3', name: 'Marco Bezzecchi',         team: 'Aprilia Racing',    points: '7'  },
+          { position: '4', name: 'Raúl Fernández',          team: 'Trackhouse Aprilia',points: '6'  },
+          { position: '5', name: 'Brad Binder',             team: 'Red Bull KTM',      points: '5'  },
+          { position: '6', name: 'Ai Ogura',                team: 'Trackhouse Aprilia',points: '4'  },
+          { position: '7', name: 'Fabio Di Giannantonio',   team: 'Pertamina VR46',    points: '3'  },
+          { position: '8', name: 'Enea Bastianini',          team: 'Tech3 KTM',         points: '2'  },
+          { position: '9', name: 'Marc Márquez',             team: 'Ducati Lenovo',     points: '1'  },
+          { position: '10',name: 'Luca Marini',              team: 'Honda HRC',         points: '1'  },
+        ],
+      },
+      2: { // Brazilian GP Sprint (22 mar 2026)
+        raceName: 'Brazilian GP Sprint',
+        results: [
+          { position: '1', name: 'Pedro Acosta',            team: 'Red Bull KTM',      points: '12' },
+          { position: '2', name: 'Jorge Martín',            team: 'Aprilia Racing',    points: '9'  },
+          { position: '3', name: 'Brad Binder',             team: 'Red Bull KTM',      points: '7'  },
+          { position: '4', name: 'Marco Bezzecchi',         team: 'Aprilia Racing',    points: '6'  },
+          { position: '5', name: 'Ai Ogura',                team: 'Trackhouse Aprilia',points: '5'  },
+          { position: '6', name: 'Marc Márquez',             team: 'Ducati Lenovo',     points: '4'  },
+          { position: '7', name: 'Raúl Fernández',           team: 'Trackhouse Aprilia',points: '3'  },
+          { position: '8', name: 'Francesco Bagnaia',        team: 'Ducati Lenovo',     points: '2'  },
+          { position: '9', name: 'Fabio Di Giannantonio',    team: 'Pertamina VR46',    points: '1'  },
+          { position: '10',name: 'Franco Morbidelli',        team: 'Pertamina VR46',    points: '1'  },
+        ],
+      },
+      3: { // Americas GP Sprint (29 mar 2026)
+        raceName: 'Americas GP Sprint',
+        results: [
+          { position: '1', name: 'Jorge Martín',            team: 'Aprilia Racing',    points: '12' },
+          { position: '2', name: 'Marc Márquez',             team: 'Ducati Lenovo',     points: '9'  },
+          { position: '3', name: 'Pedro Acosta',             team: 'Red Bull KTM',      points: '7'  },
+          { position: '4', name: 'Francesco Bagnaia',        team: 'Ducati Lenovo',     points: '6'  },
+          { position: '5', name: 'Marco Bezzecchi',          team: 'Aprilia Racing',    points: '5'  },
+          { position: '6', name: 'Ai Ogura',                 team: 'Trackhouse Aprilia',points: '4'  },
+          { position: '7', name: 'Brad Binder',              team: 'Red Bull KTM',      points: '3'  },
+          { position: '8', name: 'Raúl Fernández',            team: 'Trackhouse Aprilia',points: '2'  },
+          { position: '9', name: 'Enea Bastianini',           team: 'Tech3 KTM',         points: '1'  },
+          { position: '10',name: 'Johann Zarco',              team: 'LCR Honda',         points: '1'  },
+        ],
+      },
+    };
+
+    const sr = sprintResults[round];
+    if (sr && sr.results.length > 0) {
+      return res.json(sr);
+    }
+
+    res.status(404).json({ error: `Nessuna sprint race per round ${round}` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NOTE DI AGGIORNAMENTO
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// F1 Sprint 2026 — 3 weekend sprint nel calendario:
+//   Round 6  → Miami (9-11 mag 2026)
+//   Round 11 → Austria (27-29 giu 2026)
+//   Round 23 → Qatar (28-30 nov 2026)
+//
+// Dopo ogni sprint, aggiornare l'oggetto hardcoded nel blocco F1 con i risultati reali.
+// Jolpica li pubblicherà entro poche ore dalla gara — quindi il branch ergast()
+// dovrebbe funzionare in automatico senza modifiche.
+//
+// MotoGP Sprint — ogni weekend (race breve al sabato).
+// Aggiornare sprintResults[round] dopo ogni GP.
+// Struttura: { raceName, results: [{position, name, team, points}] }
+//
+
 // ══════════════════════════════════════════════════════════════════════════════
 // TABELLONE STAZIONE — cerca stazione + partenze + arrivi (ViaggiatrEno)
 // ══════════════════════════════════════════════════════════════════════════════
