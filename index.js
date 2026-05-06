@@ -1476,16 +1476,10 @@ app.get('/sport/motogp/calendar',async(req,res)=>{
 app.get('/sport/motogp/table',async(req,res)=>{
   try{
     const y=new Date().getFullYear();
-    // 1. ESPN MotoGP standings (source più aggiornata)
     try{
-        // ESPN vuoto — skip
-    }catch{}
-    // Wikipedia API — classifica MotoGP 2025 dalla pagina standings
-    try{
-      const wikiUrl='https://en.wikipedia.org/w/api.php?action=parse&page=2025_MotoGP_World_Championship&prop=wikitext&section=0&format=json&origin=*';
-      const wr=await axios.get(wikiUrl,{timeout:8000});
+      const wikiUrl='https://en.wikipedia.org/w/api.php?action=parse&page=2026_MotoGP_World_Championship&prop=wikitext&section=0&format=json&origin=*';
+      const wr=await axios.get(wikiUrl,{timeout:6000});
       const wt=wr.data?.parse?.wikitext?.['*']||'';
-      // Cerca tabella standings piloti nel wikitext
       const tableMatch=wt.match(/\{\| class="wikitable"[\s\S]*?\|\}/);
       if(tableMatch){
         const rows=tableMatch[0].split('\n|-').slice(1);
@@ -1500,26 +1494,29 @@ app.get('/sport/motogp/table',async(req,res)=>{
         if(standings.length>0) return res.json({table:standings,season:String(y)});
       }
     }catch{}
-    // Classifica 2026 dopo Americas GP (Round 3) — aggiornare dopo ogni gara
+    // Hardcoded aggiornato dopo Spanish GP R4 (Jerez, 27 apr 2026)
     return res.json({table:[
-      {intRank:'1', strTeam:'Jorge Martín',            strNation:'Aprilia Racing',     intPoints:'61',intPlayed:'3'},
-      {intRank:'2', strTeam:'Pedro Acosta',            strNation:'Red Bull KTM',       intPoints:'57',intPlayed:'3'},
-      {intRank:'3', strTeam:'Marco Bezzecchi',         strNation:'Aprilia Racing',     intPoints:'52',intPlayed:'3'},
-      {intRank:'4', strTeam:'Ai Ogura',                strNation:'Trackhouse Aprilia', intPoints:'35',intPlayed:'3'},
-      {intRank:'5', strTeam:'Raúl Fernández',          strNation:'Trackhouse Aprilia', intPoints:'34',intPlayed:'3'},
-      {intRank:'6', strTeam:'Brad Binder',             strNation:'Red Bull KTM',       intPoints:'32',intPlayed:'3'},
-      {intRank:'7', strTeam:'Marc Márquez',            strNation:'Ducati Lenovo',      intPoints:'25',intPlayed:'3'},
-      {intRank:'8', strTeam:'Fabio Di Giannantonio',   strNation:'Pertamina VR46',     intPoints:'25',intPlayed:'3'},
-      {intRank:'9', strTeam:'Francesco Bagnaia',       strNation:'Ducati Lenovo',      intPoints:'23',intPlayed:'3'},
-      {intRank:'10',strTeam:'Enea Bastianini',         strNation:'Tech3 KTM',          intPoints:'19',intPlayed:'3'},
-      {intRank:'11',strTeam:'Luca Marini',             strNation:'Honda HRC',          intPoints:'20',intPlayed:'3'},
-      {intRank:'12',strTeam:'Franco Morbidelli',       strNation:'Pertamina VR46',     intPoints:'14',intPlayed:'3'},
-      {intRank:'13',strTeam:'Johann Zarco',            strNation:'LCR Honda',          intPoints:'12',intPlayed:'3'},
-      {intRank:'14',strTeam:'Joan Mir',                strNation:'Honda HRC',          intPoints:'9', intPlayed:'3'},
-      {intRank:'15',strTeam:'Fabio Quartararo',        strNation:'Monster Yamaha',     intPoints:'5', intPlayed:'3'},
-      {intRank:'16',strTeam:'Diogo Moreira',           strNation:'LCR Honda',          intPoints:'4', intPlayed:'3'},
-      {intRank:'17',strTeam:'Alex Rins',               strNation:'Monster Yamaha',     intPoints:'2', intPlayed:'3'},
-    ],season:'2026',note:'dopo Americas GP R3'});
+      {intRank:'1', strTeam:'Marco Bezzecchi',        strNation:'Aprilia Racing',      intPoints:'101',intPlayed:'4'},
+      {intRank:'2', strTeam:'Jorge Martín',            strNation:'Aprilia Racing',      intPoints:'90', intPlayed:'4'},
+      {intRank:'3', strTeam:'Fabio Di Giannantonio',   strNation:'Pertamina VR46',      intPoints:'71', intPlayed:'4'},
+      {intRank:'4', strTeam:'Pedro Acosta',            strNation:'Red Bull KTM',        intPoints:'66', intPlayed:'4'},
+      {intRank:'5', strTeam:'Marc Márquez',            strNation:'Ducati Lenovo',       intPoints:'57', intPlayed:'4'},
+      {intRank:'6', strTeam:'Raúl Fernández',          strNation:'Trackhouse Aprilia',  intPoints:'54', intPlayed:'4'},
+      {intRank:'7', strTeam:'Alex Márquez',            strNation:'BK8 Gresini Ducati',  intPoints:'53', intPlayed:'4'},
+      {intRank:'8', strTeam:'Ai Ogura',                strNation:'Trackhouse Aprilia',  intPoints:'48', intPlayed:'4'},
+      {intRank:'9', strTeam:'Francesco Bagnaia',       strNation:'Ducati Lenovo',       intPoints:'34', intPlayed:'4'},
+      {intRank:'10',strTeam:'Enea Bastianini',         strNation:'Tech3 KTM',           intPoints:'30', intPlayed:'4'},
+      {intRank:'11',strTeam:'Brad Binder',             strNation:'Red Bull KTM',        intPoints:'28', intPlayed:'4'},
+      {intRank:'12',strTeam:'Luca Marini',             strNation:'Honda HRC',           intPoints:'27', intPlayed:'4'},
+      {intRank:'13',strTeam:'Franco Morbidelli',       strNation:'Pertamina VR46',      intPoints:'25', intPlayed:'4'},
+      {intRank:'14',strTeam:'Johann Zarco',            strNation:'Castrol Honda LCR',   intPoints:'24', intPlayed:'4'},
+      {intRank:'15',strTeam:'Fermin Aldeguer',         strNation:'BK8 Gresini Ducati',  intPoints:'20', intPlayed:'4'},
+      {intRank:'16',strTeam:'Fabio Quartararo',        strNation:'Monster Yamaha',      intPoints:'11', intPlayed:'4'},
+      {intRank:'17',strTeam:'Diogo Moreira',           strNation:'Pro Honda LCR',       intPoints:'9',  intPlayed:'4'},
+      {intRank:'18',strTeam:'Joan Mir',                strNation:'Honda HRC',           intPoints:'4',  intPlayed:'4'},
+      {intRank:'19',strTeam:'Alex Rins',               strNation:'Monster Yamaha',      intPoints:'3',  intPlayed:'4'},
+      {intRank:'20',strTeam:'Toprak Razgatlioglu',     strNation:'Pramac Yamaha',       intPoints:'1',  intPlayed:'4'},
+    ],season:'2026',note:'dopo Spanish GP R4'});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1601,6 +1598,20 @@ app.get('/sport/motogp/last',async(req,res)=>{
         {position:'9',name:'Johann Zarco',       abbr:'JZ5', team:'LCR Honda',         points:'7'},
         {position:'10',name:'Luca Marini',       abbr:'LM10',team:'Honda HRC',         points:'6'},
       ]});
+    if(lastRace.round===4){
+      return res.json({race:lastRace,results:[
+       {position:'1', name:'Alex Márquez',          team:'BK8 Gresini Ducati', points:'25'},
+       {position:'2', name:'Marco Bezzecchi',       team:'Aprilia Racing',     points:'20'},
+       {position:'3', name:'Fabio Di Giannantonio', team:'Pertamina VR46',     points:'16'},
+       {position:'4', name:'Ai Ogura',              team:'Trackhouse Aprilia', points:'13'},
+       {position:'5', name:'Raúl Fernández',        team:'Trackhouse Aprilia', points:'11'},
+       {position:'6', name:'Johann Zarco',          team:'Castrol Honda LCR',  points:'10'},
+       {position:'7', name:'Enea Bastianini',       team:'Tech3 KTM',          points:'9'},
+       {position:'8', name:'Jorge Martín',          team:'Aprilia Racing',     points:'8'},
+       {position:'9', name:'Brad Binder',           team:'Red Bull KTM',       points:'7'},
+       {position:'10',name:'Luca Marini',           team:'Honda HRC',          points:'6'},
+      ]});
+      
     }
     res.json({race:lastRace,results:[]});
   }catch(e){res.status(500).json({error:e.message});}
@@ -1610,15 +1621,17 @@ app.get('/sport/motogp/last',async(req,res)=>{
 app.get('/sport/motogp/constructors',async(req,res)=>{
   // Classifica costruttori MotoGP 2026 dopo Americas GP (R3)
   res.json({constructors:[
-    {position:'1',constructor:'Aprilia Racing',   points:'120'},
-    {position:'2',constructor:'Red Bull KTM',     points:'104'},
-    {position:'3',constructor:'Trackhouse Aprilia',points:'69'},
-    {position:'4',constructor:'Ducati Lenovo',    points:'48'},
-    {position:'5',constructor:'Pertamina VR46',   points:'33'},
-    {position:'6',constructor:'Honda HRC',        points:'22'},
-    {position:'7',constructor:'Tech3 KTM',        points:'19'},
-    {position:'8',constructor:'LCR Honda',        points:'12'},
-    {position:'9',constructor:'Monster Yamaha',   points:'3'},
+    {position:'1',constructor:'Aprilia Racing',   points:'191'},
+    {position:'2',constructor:'Trackhouse Aprilia',points:'102'},
+    {position:'3',constructor:'Pertamina VR46',   points:'96'},
+    {position:'4',constructor:'Red Bull KTM',     points:'94'},     
+    {position:'5',constructor:'Ducati Lenovo',    points:'491'},
+    {position:'6',constructor:'BK8 Gresini Racing',  points:'33'},
+    {position:'7',constructor:'LCR Honda',        points:'33'},
+    {position:'8',constructor:'Honda HRC',        points:'31'},   
+    {position:'9',constructor:'Tech3 KTM',        points:'30'},    
+    {position:'10',constructor:'Monster Yamaha',   points:'14'},
+    {position:'11',constructor:'Prima Pramac Yamaha',   points:'1'},
   ],season:'2026',note:'dopo Americas GP R3'});
 });
 
@@ -1628,41 +1641,53 @@ app.get('/sport/motogp/past',async(req,res)=>{
     .filter(r=>new Date(r.dateEvent)<now)
     .sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent));
   const knownResults={
-    'moto2026_1':[  // Thai GP — risultati reali (1 mar 2026)
-      {position:'1', name:'Marco Bezzecchi',      team:'Aprilia Racing',    points:'25'},
-      {position:'2', name:'Pedro Acosta',          team:'Red Bull KTM',      points:'20'},
-      {position:'3', name:'Raúl Fernández',        team:'Trackhouse Aprilia',points:'16'},
-      {position:'4', name:'Jorge Martín',          team:'Aprilia Racing',    points:'13'},
-      {position:'5', name:'Ai Ogura',              team:'Trackhouse Aprilia',points:'11'},
-      {position:'6', name:'Brad Binder',           team:'Red Bull KTM',      points:'10'},
-      {position:'7', name:'Fabio Di Giannantonio', team:'Pertamina VR46',    points:'9'},
-      {position:'8', name:'Luca Marini',           team:'Honda HRC',         points:'8'},
-      {position:'9', name:'Enea Bastianini',       team:'Tech3 KTM',         points:'7'},
-      {position:'10',name:'Franco Morbidelli',     team:'Pertamina VR46',    points:'6'},
+    'moto2026_1':[
+      {position:'1', name:'Marco Bezzecchi',       team:'Aprilia Racing',     points:'25'},
+      {position:'2', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'20'},
+      {position:'3', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'16'},
+      {position:'4', name:'Jorge Martín',           team:'Aprilia Racing',     points:'13'},
+      {position:'5', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'11'},
+      {position:'6', name:'Brad Binder',            team:'Red Bull KTM',       points:'10'},
+      {position:'7', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'9'},
+      {position:'8', name:'Luca Marini',            team:'Honda HRC',          points:'8'},
+      {position:'9', name:'Enea Bastianini',        team:'Tech3 KTM',          points:'7'},
+      {position:'10',name:'Franco Morbidelli',      team:'Pertamina VR46',     points:'6'},
     ],
-    'moto2026_2':[  // Brazilian GP — risultati reali (22 mar 2026)
-      {position:'1', name:'Pedro Acosta',          team:'Red Bull KTM',      points:'25'},
-      {position:'2', name:'Jorge Martín',          team:'Aprilia Racing',    points:'20'},
-      {position:'3', name:'Marco Bezzecchi',       team:'Aprilia Racing',    points:'16'},
-      {position:'4', name:'Brad Binder',           team:'Red Bull KTM',      points:'13'},
-      {position:'5', name:'Ai Ogura',              team:'Trackhouse Aprilia',points:'11'},
-      {position:'6', name:'Raúl Fernández',        team:'Trackhouse Aprilia',points:'10'},
-      {position:'7', name:'Marc Márquez',          team:'Ducati Lenovo',     points:'9'},
-      {position:'8', name:'Fabio Di Giannantonio', team:'Pertamina VR46',    points:'8'},
-      {position:'9', name:'Francesco Bagnaia',     team:'Ducati Lenovo',     points:'7'},
-      {position:'10',name:'Enea Bastianini',       team:'Tech3 KTM',         points:'6'},
+    'moto2026_2':[
+      {position:'1', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'25'},
+      {position:'2', name:'Jorge Martín',           team:'Aprilia Racing',     points:'20'},
+      {position:'3', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'16'},
+      {position:'4', name:'Brad Binder',            team:'Red Bull KTM',       points:'13'},
+      {position:'5', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'11'},
+      {position:'6', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'10'},
+      {position:'7', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'9'},
+      {position:'8', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'8'},
+      {position:'9', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'7'},
+      {position:'10',name:'Enea Bastianini',        team:'Tech3 KTM',          points:'6'},
     ],
-    'moto2026_3':[  // Americas GP — risultati reali (29 mar 2026)
-      {position:'1', name:'Jorge Martín',          team:'Aprilia Racing',    points:'25'},
-      {position:'2', name:'Pedro Acosta',          team:'Red Bull KTM',      points:'20'},
-      {position:'3', name:'Marc Márquez',          team:'Ducati Lenovo',     points:'16'},
-      {position:'4', name:'Ai Ogura',              team:'Trackhouse Aprilia',points:'13'},
-      {position:'5', name:'Marco Bezzecchi',       team:'Aprilia Racing',    points:'11'},
-      {position:'6', name:'Francesco Bagnaia',     team:'Ducati Lenovo',     points:'10'},
-      {position:'7', name:'Brad Binder',           team:'Red Bull KTM',      points:'9'},
-      {position:'8', name:'Raúl Fernández',        team:'Trackhouse Aprilia',points:'8'},
-      {position:'9', name:'Johann Zarco',          team:'LCR Honda',         points:'7'},
-      {position:'10',name:'Luca Marini',           team:'Honda HRC',         points:'6'},
+    'moto2026_3':[
+      {position:'1', name:'Jorge Martín',           team:'Aprilia Racing',     points:'25'},
+      {position:'2', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'20'},
+      {position:'3', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'16'},
+      {position:'4', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'13'},
+      {position:'5', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'11'},
+      {position:'6', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'10'},
+      {position:'7', name:'Brad Binder',            team:'Red Bull KTM',       points:'9'},
+      {position:'8', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'8'},
+      {position:'9', name:'Johann Zarco',           team:'Castrol Honda LCR',  points:'7'},
+      {position:'10',name:'Luca Marini',            team:'Honda HRC',          points:'6'},
+    ],
+    'moto2026_4':[  // ← NUOVO: Spanish GP Jerez, 27 apr 2026
+      {position:'1', name:'Alex Márquez',           team:'BK8 Gresini Ducati', points:'25'},
+      {position:'2', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'20'},
+      {position:'3', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'16'},
+      {position:'4', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'13'},
+      {position:'5', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'11'},
+      {position:'6', name:'Johann Zarco',           team:'Castrol Honda LCR',  points:'10'},
+      {position:'7', name:'Enea Bastianini',        team:'Tech3 KTM',          points:'9'},
+      {position:'8', name:'Jorge Martín',           team:'Aprilia Racing',     points:'8'},
+      {position:'9', name:'Brad Binder',            team:'Red Bull KTM',       points:'7'},
+      {position:'10',name:'Luca Marini',            team:'Honda HRC',          points:'6'},
     ],
   };
   const withResults=past.map(r=>({...r,results:knownResults[r.idEvent]||[]}));
@@ -2431,67 +2456,60 @@ app.get('/sport/f1/race/:round/sprint', async (req, res) => {
 // MotoGP ha sprint race (gara corta) ogni weekend dal 2023.
 // Fonte: hardcoded per i round noti (ESPN non ha endpoint sprint separato)
 app.get('/sport/motogp/race/:round/sprint', async (req, res) => {
-  try {
-    const round = parseInt(req.params.round) || 0;
-
-    // Risultati sprint MotoGP 2026 — da aggiornare dopo ogni gara
-    const sprintResults = {
-      1: { // Thai GP Sprint (1 mar 2026)
-        raceName: 'Thai GP Sprint',
-        results: [
-          { position: '1', name: 'Jorge Martín',           team: 'Aprilia Racing',    points: '12' },
-          { position: '2', name: 'Pedro Acosta',            team: 'Red Bull KTM',      points: '9'  },
-          { position: '3', name: 'Marco Bezzecchi',         team: 'Aprilia Racing',    points: '7'  },
-          { position: '4', name: 'Raúl Fernández',          team: 'Trackhouse Aprilia',points: '6'  },
-          { position: '5', name: 'Brad Binder',             team: 'Red Bull KTM',      points: '5'  },
-          { position: '6', name: 'Ai Ogura',                team: 'Trackhouse Aprilia',points: '4'  },
-          { position: '7', name: 'Fabio Di Giannantonio',   team: 'Pertamina VR46',    points: '3'  },
-          { position: '8', name: 'Enea Bastianini',          team: 'Tech3 KTM',         points: '2'  },
-          { position: '9', name: 'Marc Márquez',             team: 'Ducati Lenovo',     points: '1'  },
-          { position: '10',name: 'Luca Marini',              team: 'Honda HRC',         points: '1'  },
-        ],
-      },
-      2: { // Brazilian GP Sprint (22 mar 2026)
-        raceName: 'Brazilian GP Sprint',
-        results: [
-          { position: '1', name: 'Pedro Acosta',            team: 'Red Bull KTM',      points: '12' },
-          { position: '2', name: 'Jorge Martín',            team: 'Aprilia Racing',    points: '9'  },
-          { position: '3', name: 'Brad Binder',             team: 'Red Bull KTM',      points: '7'  },
-          { position: '4', name: 'Marco Bezzecchi',         team: 'Aprilia Racing',    points: '6'  },
-          { position: '5', name: 'Ai Ogura',                team: 'Trackhouse Aprilia',points: '5'  },
-          { position: '6', name: 'Marc Márquez',             team: 'Ducati Lenovo',     points: '4'  },
-          { position: '7', name: 'Raúl Fernández',           team: 'Trackhouse Aprilia',points: '3'  },
-          { position: '8', name: 'Francesco Bagnaia',        team: 'Ducati Lenovo',     points: '2'  },
-          { position: '9', name: 'Fabio Di Giannantonio',    team: 'Pertamina VR46',    points: '1'  },
-          { position: '10',name: 'Franco Morbidelli',        team: 'Pertamina VR46',    points: '1'  },
-        ],
-      },
-      3: { // Americas GP Sprint (29 mar 2026)
-        raceName: 'Americas GP Sprint',
-        results: [
-          { position: '1', name: 'Jorge Martín',            team: 'Aprilia Racing',    points: '12' },
-          { position: '2', name: 'Marc Márquez',             team: 'Ducati Lenovo',     points: '9'  },
-          { position: '3', name: 'Pedro Acosta',             team: 'Red Bull KTM',      points: '7'  },
-          { position: '4', name: 'Francesco Bagnaia',        team: 'Ducati Lenovo',     points: '6'  },
-          { position: '5', name: 'Marco Bezzecchi',          team: 'Aprilia Racing',    points: '5'  },
-          { position: '6', name: 'Ai Ogura',                 team: 'Trackhouse Aprilia',points: '4'  },
-          { position: '7', name: 'Brad Binder',              team: 'Red Bull KTM',      points: '3'  },
-          { position: '8', name: 'Raúl Fernández',            team: 'Trackhouse Aprilia',points: '2'  },
-          { position: '9', name: 'Enea Bastianini',           team: 'Tech3 KTM',         points: '1'  },
-          { position: '10',name: 'Johann Zarco',              team: 'LCR Honda',         points: '1'  },
-        ],
-      },
-    };
-
-    const sr = sprintResults[round];
-    if (sr && sr.results.length > 0) {
-      return res.json(sr);
-    }
-
-    res.status(404).json({ error: `Nessuna sprint race per round ${round}` });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  const round=parseInt(req.params.round)||0;
+  const sprintResults={
+    1:{raceName:'Thai GP Sprint',results:[
+      {position:'1', name:'Jorge Martín',           team:'Aprilia Racing',     points:'12'},
+      {position:'2', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'9'},
+      {position:'3', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'7'},
+      {position:'4', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'6'},
+      {position:'5', name:'Brad Binder',            team:'Red Bull KTM',       points:'5'},
+      {position:'6', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'4'},
+      {position:'7', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'3'},
+      {position:'8', name:'Enea Bastianini',        team:'Tech3 KTM',          points:'2'},
+      {position:'9', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'1'},
+      {position:'10',name:'Luca Marini',            team:'Honda HRC',          points:'1'},
+    ]},
+    2:{raceName:'Brazilian GP Sprint',results:[
+      {position:'1', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'12'},
+      {position:'2', name:'Jorge Martín',           team:'Aprilia Racing',     points:'9'},
+      {position:'3', name:'Brad Binder',            team:'Red Bull KTM',       points:'7'},
+      {position:'4', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'6'},
+      {position:'5', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'5'},
+      {position:'6', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'4'},
+      {position:'7', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'3'},
+      {position:'8', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'2'},
+      {position:'9', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'1'},
+      {position:'10',name:'Franco Morbidelli',      team:'Pertamina VR46',     points:'1'},
+    ]},
+    3:{raceName:'Americas GP Sprint',results:[
+      {position:'1', name:'Jorge Martín',           team:'Aprilia Racing',     points:'12'},
+      {position:'2', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'9'},
+      {position:'3', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'7'},
+      {position:'4', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'6'},
+      {position:'5', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'5'},
+      {position:'6', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'4'},
+      {position:'7', name:'Brad Binder',            team:'Red Bull KTM',       points:'3'},
+      {position:'8', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'2'},
+      {position:'9', name:'Enea Bastianini',        team:'Tech3 KTM',          points:'1'},
+      {position:'10',name:'Johann Zarco',           team:'Castrol Honda LCR',  points:'1'},
+    ]},
+    4:{raceName:'Spanish GP Sprint',results:[  // Jerez — Marc Márquez vince sotto la pioggia
+      {position:'1', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'12'},
+      {position:'2', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'9'},
+      {position:'3', name:'Franco Morbidelli',      team:'Pertamina VR46',     points:'7'},
+      {position:'4', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'6'},
+      {position:'5', name:'Johann Zarco',           team:'Castrol Honda LCR',  points:'5'},
+      {position:'6', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'4'},
+      {position:'7', name:'Jorge Martín',           team:'Aprilia Racing',     points:'3'},
+      {position:'8', name:'Enea Bastianini',        team:'Tech3 KTM',          points:'2'},
+      {position:'9', name:'Brad Binder',            team:'Red Bull KTM',       points:'1'},
+      {position:'10',name:'Luca Marini',            team:'Honda HRC',          points:'1'},
+    ]},
+  };
+  const sr=sprintResults[round];
+  if(sr&&sr.results.length>0) return res.json(sr);
+  res.status(404).json({error:`Nessuna sprint race per round ${round}`});
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
