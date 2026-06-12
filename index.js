@@ -301,8 +301,8 @@ app.get('/sport/soccer/cups', async (req, res) => {
 });
 
 // Mondiali 2026 — gironi statici (senza segnaposto playoff)
-const WC2026_GROUPS={A:[{t:'Messico'},{t:'Corea del Sud'},{t:'Sudafrica'},{t:'Camerun'}],B:[{t:'Canada'},{t:'Svizzera'},{t:'Qatar'},{t:'Venezuela'}],C:[{t:'Brasile'},{t:'Marocco'},{t:'Scozia'},{t:'Haiti'}],D:[{t:'USA'},{t:'Australia'},{t:'Paraguay'},{t:'Nuova Zelanda'}],E:[{t:'Germania'},{t:'Ecuador'},{t:'Costa d\'Avorio'},{t:'Curacao'}],F:[{t:'Olanda'},{t:'Giappone'},{t:'Tunisia'},{t:'Congo RD'}],G:[{t:'Belgio'},{t:'Iran'},{t:'Egitto'},{t:'Nuova Zelanda'}],H:[{t:'Spagna'},{t:'Uruguay'},{t:'Arabia Saudita'},{t:'Capo Verde'}],I:[{t:'Francia'},{t:'Senegal'},{t:'Norvegia'},{t:'Uzbekistan'}],J:[{t:'Argentina'},{t:'Algeria'},{t:'Austria'},{t:'Giordania'}],K:[{t:'Portogallo'},{t:'Colombia'},{t:'Uzbekistan'},{t:'Iraq'}],L:[{t:'Inghilterra'},{t:'Croazia'},{t:'Panama'},{t:'Ghana'}]};
-const WC_IT_MAP={'Mexico':'Messico','South Korea':'Corea del Sud','South Africa':'Sudafrica','Switzerland':'Svizzera','United States':'USA','Morocco':'Marocco','Scotland':'Scozia','Germany':'Germania','Ecuador':'Ecuador','Ivory Coast':'Costa d\'Avorio','Netherlands':'Olanda','Japan':'Giappone','Tunisia':'Tunisia','Belgium':'Belgio','Egypt':'Egitto','Spain':'Spagna','Uruguay':'Uruguay','Saudi Arabia':'Arabia Saudita','Cape Verde':'Capo Verde','France':'Francia','Senegal':'Senegal','Norway':'Norvegia','Argentina':'Argentina','Algeria':'Algeria','Austria':'Austria','Jordan':'Giordania','Portugal':'Portogallo','Colombia':'Colombia','England':'Inghilterra','Croatia':'Croazia','Panama':'Panama','Ghana':'Ghana','Canada':'Canada','Qatar':'Qatar','Brazil':'Brasile','Haiti':'Haiti','Australia':'Australia','Paraguay':'Paraguay','New Zealand':'Nuova Zelanda','Curacao':'Curacao','Cameroon':'Camerun','Venezuela':'Venezuela','Congo DR':'Congo RD','Uzbekistan':'Uzbekistan','Iraq':'Iraq'};
+const WC2026_GROUPS={A:[{t:'Messico'},{t:'Corea del Sud'},{t:'Sudafrica'},{t:'Camerun'}],B:[{t:'Canada'},{t:'Svizzera'},{t:'Qatar'},{t:'Bosnia-Erz.'}],C:[{t:'Brasile'},{t:'Marocco'},{t:'Scozia'},{t:'Haiti'}],D:[{t:'USA'},{t:'Australia'},{t:'Paraguay'},{t:'Nuova Zelanda'}],E:[{t:'Germania'},{t:'Ecuador'},{t:'Costa d\'Avorio'},{t:'Curacao'}],F:[{t:'Olanda'},{t:'Giappone'},{t:'Tunisia'},{t:'Congo RD'}],G:[{t:'Belgio'},{t:'Iran'},{t:'Egitto'},{t:'Indonesia'}],H:[{t:'Spagna'},{t:'Uruguay'},{t:'Arabia Saudita'},{t:'Capo Verde'}],I:[{t:'Francia'},{t:'Senegal'},{t:'Norvegia'},{t:'Uzbekistan'}],J:[{t:'Argentina'},{t:'Algeria'},{t:'Austria'},{t:'Giordania'}],K:[{t:'Portogallo'},{t:'Colombia'},{t:'Serbia'},{t:'Iraq'}],L:[{t:'Inghilterra'},{t:'Croazia'},{t:'Panama'},{t:'Ghana'}]};
+const WC_IT_MAP={'Mexico':'Messico','South Korea':'Corea del Sud','South Africa':'Sudafrica','Switzerland':'Svizzera','United States':'USA','Morocco':'Marocco','Scotland':'Scozia','Germany':'Germania','Ecuador':'Ecuador','Ivory Coast':'Costa d\'Avorio','Netherlands':'Olanda','Japan':'Giappone','Tunisia':'Tunisia','Belgium':'Belgio','Egypt':'Egitto','Spain':'Spagna','Uruguay':'Uruguay','Saudi Arabia':'Arabia Saudita','Cape Verde':'Capo Verde','France':'Francia','Senegal':'Senegal','Norway':'Norvegia','Argentina':'Argentina','Algeria':'Algeria','Austria':'Austria','Jordan':'Giordania','Portugal':'Portogallo','Colombia':'Colombia','England':'Inghilterra','Croatia':'Croazia','Panama':'Panama','Ghana':'Ghana','Canada':'Canada','Qatar':'Qatar','Brazil':'Brasile','Haiti':'Haiti','Australia':'Australia','Paraguay':'Paraguay','New Zealand':'Nuova Zelanda','Curacao':'Curacao','Cameroon':'Camerun','Venezuela':'Venezuela','Congo DR':'Congo RD','Uzbekistan':'Uzbekistan','Iraq':'Iraq','Bosnia and Herzegovina':'Bosnia-Erz.','Bosnia Herzegovina':'Bosnia-Erz.','Bosnia-Herzegovina':'Bosnia-Erz.','Indonesia':'Indonesia','Serbia':'Serbia','Venezuela':'Venezuela'};
 function wcIt(n){return WC_IT_MAP[n]||n;}
 app.get('/sport/soccer/worldcup2026',async(req,res)=>{
   try{
@@ -540,12 +540,33 @@ app.get('/sport/f1/past',async(req,res)=>{try{const cal=await ergast(`/${F1Y}`).
 
 app.get('/sport/f1/live',async(req,res)=>{try{const sessions=await openf1('/sessions?session_key=latest');if(!sessions?.length)return res.json({live:false});const sess=sessions[0],now=new Date();const isLive=now>=new Date(sess.date_start)&&now<=new Date(sess.date_end);if(!isLive)return res.json({live:false,session:sess.session_name,meeting:sess.meeting_name});const[posArr,drvArr]=await Promise.all([openf1('/position?session_key=latest'),openf1(`/drivers?session_key=${sess.session_key}`)]);const finals={};for(const p of(posArr||[])){if(!finals[p.driver_number]||p.date>finals[p.driver_number].date)finals[p.driver_number]=p;}const positions=Object.values(finals).sort((a,b)=>a.position-b.position).map(p=>{const d=(drvArr||[]).find(dr=>dr.driver_number===p.driver_number)||{};return{pos:p.position,num:p.driver_number,name:`${d.first_name||''} ${d.last_name||p.driver_number}`.trim(),team:d.team_name||'',abbr:d.name_acronym||''};});res.json({live:true,session:sess.session_name,meeting:sess.meeting_name,positions});}catch(e){res.status(500).json({error:e.message});}});
 
-app.get('/sport/f1/race/:round/results',async(req,res)=>{try{const d=await ergast(`/${F1Y}/${req.params.round}/results`,300000);const results=(d?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,10).map(r=>({position:r.position,driver:`${r.Driver?.givenName||''} ${r.Driver?.familyName||''}`.trim(),constructor:r.Constructor?.name||'',points:r.points||'0',time:r.Time?.time||r.status||'',grid:r.grid||''}));res.json({results,raceName:d?.MRData?.RaceTable?.Races?.[0]?.raceName||''});}catch(e){res.status(500).json({error:e.message});}});
+app.get('/sport/f1/race/:round/results',async(req,res)=>{try{
+  // Jolpica primary
+  try{
+    const d=await ergast(`/${F1Y}/${req.params.round}/results`,300000);
+    const results=(d?.MRData?.RaceTable?.Races?.[0]?.Results||[]).slice(0,10).map(r=>({position:r.position,driver:`${r.Driver?.givenName||''} ${r.Driver?.familyName||''}`.trim(),constructor:r.Constructor?.name||'',points:r.points||'0',time:r.Time?.time||r.status||'',grid:r.grid||''}));
+    if(results.length>0)return res.json({results,raceName:d?.MRData?.RaceTable?.Races?.[0]?.raceName||''});
+  }catch{}
+  // ESPN fallback
+  const raceInfo=F1_CAL_2026.find(r=>r.round===req.params.round);
+  if(raceInfo?.date){try{
+    const dateStr=raceInfo.date.replace(/-/g,'');
+    const ed=await cGet(`https://site.web.api.espn.com/apis/site/v2/sports/racing/f1/scoreboard?dates=${dateStr}`,300000);
+    const comps=(ed?.events?.[0]?.competitions?.[0]?.competitors||[]);
+    if(comps.length){
+      const results=comps.sort((a,b)=>(a.order||99)-(b.order||99)).slice(0,10).map(c=>({position:String(c.order||0),driver:c.athlete?.displayName||'',constructor:c.team?.displayName||c.team?.name||'',points:String(c.score||''),time:'',grid:''}));
+      if(results.length>0)return res.json({results,raceName:raceInfo.raceName});
+    }
+  }catch{}}
+  res.json({results:[],raceName:raceInfo?.raceName||''});
+}catch(e){res.status(500).json({error:e.message});}});
 
 // Sprint F1 — da Jolpica automaticamente (3 sprint nel 2026: Miami R6, Austria R11, Qatar R23)
 app.get('/sport/f1/race/:round/sprint',async(req,res)=>{try{const round=req.params.round;const d=await ergast(`/${F1Y}/${round}/sprint`,300000).catch(()=>null);const sr=d?.MRData?.RaceTable?.Races?.[0]?.SprintResults||[];if(sr.length>0)return res.json({results:sr.slice(0,20).map(r=>({position:r.position,driver:`${r.Driver?.givenName||''} ${r.Driver?.familyName||''}`.trim(),constructor:r.Constructor?.name||'',points:r.points||'0',time:r.Time?.time||r.status||''})),raceName:d?.MRData?.RaceTable?.Races?.[0]?.raceName||''});res.status(404).json({error:`Nessuna sprint per round ${round}`});}catch(e){res.status(500).json({error:e.message});}});
 
-app.get('/sport/f1/news',async(req,res)=>{try{const feeds=['https://news.google.com/rss/search?q=Formula+1&hl=it&gl=IT&ceid=IT:it','https://www.formulapassion.it/feed/'];const items=[];for(const url of feeds){try{const r=await axios.get(url,{timeout:8000,headers:{'User-Agent':'Mozilla/5.0'}});const xml=r.data.toString();const itemRx=/<item>([\s\S]*?)<\/item>/g;let m;while((m=itemRx.exec(xml))!==null&&items.length<15){const b=m[1];const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/${tag}>`,'i'));return x?x[1].replace(/<[^>]+>/g,'').trim():null;};const title=getTag('title'),linkM=b.match(/<link\s*\/?>\s*([^<]*)<\/link>/i)||b.match(/<guid[^>]*>([^<]*)<\/guid>/i),pub=getTag('pubDate');const link=linkM?linkM[1].trim():null;const src=url.includes('google')?getTag('source')||'Google News':'FormulaPassion';if(title&&link)items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:src});}if(items.length>=8)break;}catch{}}res.json({items:items.slice(0,15)});}catch(e){res.status(500).json({error:e.message});}});
+const NEWS_PAYWALL=['motorsport.com','motorsport','oa sport','oasport','oasport.it','moto.it','paddock-live','motormaniacs','gpone.com'];
+const isPaywall=src=>NEWS_PAYWALL.some(b=>(src||'').toLowerCase().includes(b));
+app.get('/sport/f1/news',async(req,res)=>{try{const feeds=['https://news.google.com/rss/search?q=Formula+1&hl=it&gl=IT&ceid=IT:it','https://www.formulapassion.it/feed/'];const items=[];for(const url of feeds){try{const r=await axios.get(url,{timeout:8000,headers:{'User-Agent':'Mozilla/5.0'}});const xml=r.data.toString();const itemRx=/<item>([\s\S]*?)<\/item>/g;let m;while((m=itemRx.exec(xml))!==null&&items.length<20){const b=m[1];const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/${tag}>`,'i'));return x?x[1].replace(/<[^>]+>/g,'').trim():null;};const title=getTag('title'),linkM=b.match(/<link\s*\/?>\s*([^<]*)<\/link>/i)||b.match(/<guid[^>]*>([^<]*)<\/guid>/i),pub=getTag('pubDate');const link=linkM?linkM[1].trim():null;const src=url.includes('google')?getTag('source')||'Google News':'FormulaPassion';if(title&&link&&!isPaywall(src))items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:src});}if(items.length>=8)break;}catch{}}res.json({items:items.slice(0,15)});}catch(e){res.status(500).json({error:e.message});}});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MOTOGP
@@ -580,15 +601,26 @@ app.get('/sport/motogp/calendar',(req,res)=>{
   res.json({past:MOTOGP_2026.filter(r=>r.dateEvent<todayStr),upcoming:MOTOGP_2026.filter(r=>r.dateEvent>=todayStr)});
 });
 
-// ── CLASSIFICA PILOTI — aggiornare intPoints e intPlayed dopo ogni GP ──────────
-// Ultimo aggiornamento: Spanish GP R5, Jerez 27 apr 2026
+// ── CLASSIFICA PILOTI — ESPN primary, Wikipedia secondary, hardcoded fallback ──
 app.get('/sport/motogp/table',async(req,res)=>{
   try{
-    const wr=await axios.get('https://en.wikipedia.org/w/api.php?action=parse&page=2026_MotoGP_World_Championship&prop=wikitext&section=0&format=json&origin=*',{timeout:6000});
-    const wt=wr.data?.parse?.wikitext?.['*']||'';
-    const tm=wt.match(/\{\| class="wikitable"[\s\S]*?\|\}/);
-    if(tm){const rows=tm[0].split('\n|-').slice(1);const standings=[];for(const row of rows){const cells=row.split('||').map(c=>c.replace(/\[\[([^|\]]+)(?:\|[^\]]+)?\]\]/g,'$1').replace(/[{}'!|]/g,'').trim());const pos=parseInt(cells[0]);if(!isNaN(pos)&&cells.length>=3)standings.push({intRank:String(pos),strTeam:cells[1]||'',strNation:'',intPoints:cells[cells.length-1]||'0',intPlayed:'0'});}if(standings.length>0)return res.json({table:standings,season:'2026',source:'wikipedia'});}
-  }catch{}
+    // ESPN primary
+    try{
+      const espn=await cGet('https://site.web.api.espn.com/apis/v2/sports/racing/motogp/standings',60000);
+      const child=(espn?.children||[]).find(c=>/(rider|pilot|driver)/i.test(c.name||''));
+      const entries=(child?.standings?.entries)||(espn?.standings?.[0]?.entries)||[];
+      if(entries.length>0){
+        const list=entries.map((e,i)=>({intRank:String(i+1),strTeam:e.athlete?.displayName||`${e.athlete?.firstName||''} ${e.athlete?.lastName||''}`.trim()||'',strNation:e.team?.displayName||'',intPoints:String(e.stats?.find(s=>s.name==='points')?.value||0),intPlayed:'0'}));
+        if(list.reduce((s,e)=>s+parseFloat(e.intPoints||0),0)>0)return res.json({table:list,season:'2026',source:'espn'});
+      }
+    }catch{}
+    // Wikipedia secondary
+    try{
+      const wr=await axios.get('https://en.wikipedia.org/w/api.php?action=parse&page=2026_MotoGP_World_Championship&prop=wikitext&section=0&format=json&origin=*',{timeout:6000});
+      const wt=wr.data?.parse?.wikitext?.['*']||'';
+      const tm=wt.match(/\{\| class="wikitable"[\s\S]*?\|\}/);
+      if(tm){const rows=tm[0].split('\n|-').slice(1);const standings=[];for(const row of rows){const cells=row.split('||').map(c=>c.replace(/\[\[([^|\]]+)(?:\|[^\]]+)?\]\]/g,'$1').replace(/[{}'!|]/g,'').trim());const pos=parseInt(cells[0]);if(!isNaN(pos)&&cells.length>=3)standings.push({intRank:String(pos),strTeam:cells[1]||'',strNation:'',intPoints:cells[cells.length-1]||'0',intPlayed:'0'});}if(standings.length>0)return res.json({table:standings,season:'2026',source:'wikipedia'});}
+    }catch{}
   res.json({table:[
     {intRank:'1', strTeam:'Marco Bezzecchi',       strNation:'Aprilia Racing',     intPoints:'101',intPlayed:'5'},
     {intRank:'2', strTeam:'Jorge Martín',           strNation:'Aprilia Racing',     intPoints:'90', intPlayed:'5'},
@@ -611,6 +643,7 @@ app.get('/sport/motogp/table',async(req,res)=>{
     {intRank:'19',strTeam:'Alex Rins',              strNation:'Monster Yamaha',     intPoints:'3',  intPlayed:'5'},
     {intRank:'20',strTeam:'Toprak Razgatlioglu',    strNation:'Pramac Yamaha',      intPoints:'1',  intPlayed:'5'},
   ],season:'2026',note:'dopo Spanish GP R5 — Jerez 27 apr 2026'});
+  }catch(e){res.status(500).json({error:e.message});}
 });
 
 // ── CLASSIFICA TEAM — aggiornare dopo ogni GP ──────────────────────────────────
@@ -631,6 +664,25 @@ app.get('/sport/motogp/constructors',(req,res)=>{
   ],season:'2026',note:'dopo Spanish GP R5'});
 });
 
+// helper ESPN — tenta più URL per ottenere risultati di una gara MotoGP per data
+async function espnMotoResults(dateEvent){
+  const d0=new Date(dateEvent);const d1=new Date(d0);d1.setDate(d1.getDate()+1);
+  const ds=d0.toISOString().slice(0,10).replace(/-/g,'');
+  const ds1=d1.toISOString().slice(0,10).replace(/-/g,'');
+  for(const url of[
+    `https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${ds}-${ds1}`,
+    `https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${ds}`,
+    `https://site.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${ds}`,
+  ]){try{
+    const data=await cGet(url,3600000);
+    for(const ev of(data?.events||[])){
+      const comps=ev?.competitions?.[0]?.competitors||[];
+      if(comps.length){return comps.sort((a,b)=>(a.order||99)-(b.order||99)).slice(0,10).map(c=>({position:String(c.order||0),name:c.athlete?.displayName||c.team?.displayName||'',team:c.team?.name||'',points:String(c.score||'')}));}
+    }
+  }catch{}}
+  return null;
+}
+
 // ── GARE PASSATE — aggiornare knownResults dopo ogni GP ────────────────────────
 app.get('/sport/motogp/past',async(req,res)=>{
   try{
@@ -646,17 +698,8 @@ app.get('/sport/motogp/past',async(req,res)=>{
   // Per i round senza dati statici, tenta ESPN in real-time
   const enriched=await Promise.all(past.map(async r=>{
     if(knownResults[r.idEvent]!==undefined)return{...r,results:knownResults[r.idEvent]};
-    try{
-      const dateStr=r.dateEvent.replace(/-/g,'');
-      const d=await cGet(`https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${dateStr}`,1800000);
-      const comps=d?.events?.[0]?.competitions?.[0]?.competitors||[];
-      if(comps.length){
-        const results=comps.sort((a,b)=>(a.order||99)-(b.order||99)).slice(0,10)
-          .map(c=>({position:String(c.order||0),name:c.athlete?.displayName||c.team?.displayName||'',team:c.team?.name||'',points:String(c.score||'')}));
-        return{...r,results};
-      }
-    }catch{}
-    return{...r,results:[]};
+    const res=await espnMotoResults(r.dateEvent).catch(()=>null);
+    return{...r,results:res||[]};
   }));
   res.json({races:enriched});
   }catch(e){res.status(500).json({error:e.message});}
@@ -668,7 +711,7 @@ app.get('/sport/motogp/last',async(req,res)=>{
     const past=MOTOGP_2026.filter(r=>r.dateEvent<todayStr).sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent));
     if(!past.length)return res.json({race:null,results:[]});
     const lastRace=past[0];
-    try{const dateStr=lastRace.dateEvent.replace(/-/g,'');const d=await axios.get(`https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${dateStr}`,{timeout:10000});const events=d.data?.events||[];for(const ev of events){const comps=ev.competitions?.[0]?.competitors||[];if(comps.length>0){const results=comps.sort((a,b)=>(a.order||99)-(b.order||99)).slice(0,20).map(c=>({position:String(c.order||0),name:c.athlete?.displayName||c.team?.displayName||'',team:c.team?.name||'',points:String(c.score||'')}));return res.json({race:lastRace,results});}}}catch{}
+    try{const espnRes=await espnMotoResults(lastRace.dateEvent);if(espnRes?.length)return res.json({race:lastRace,results:espnRes});}catch{}
     const hc={'moto2026_1':[{position:'1',name:'Marco Bezzecchi',team:'Aprilia Racing',points:'25'},{position:'2',name:'Pedro Acosta',team:'Red Bull KTM',points:'20'},{position:'3',name:'Raúl Fernández',team:'Trackhouse Aprilia',points:'16'}],'moto2026_2':[{position:'1',name:'Pedro Acosta',team:'Red Bull KTM',points:'25'},{position:'2',name:'Jorge Martín',team:'Aprilia Racing',points:'20'},{position:'3',name:'Marco Bezzecchi',team:'Aprilia Racing',points:'16'}],'moto2026_3':[{position:'1',name:'Jorge Martín',team:'Aprilia Racing',points:'25'},{position:'2',name:'Pedro Acosta',team:'Red Bull KTM',points:'20'},{position:'3',name:'Marc Márquez',team:'Ducati Lenovo',points:'16'}],'moto2026_4':[],'moto2026_5':[{position:'1',name:'Alex Márquez',team:'BK8 Gresini Ducati',points:'25'},{position:'2',name:'Marco Bezzecchi',team:'Aprilia Racing',points:'20'},{position:'3',name:'Fabio Di Giannantonio',team:'Pertamina VR46',points:'16'},{position:'4',name:'Ai Ogura',team:'Trackhouse Aprilia',points:'13'},{position:'5',name:'Raúl Fernández',team:'Trackhouse Aprilia',points:'11'},{position:'6',name:'Johann Zarco',team:'Castrol Honda LCR',points:'10'},{position:'7',name:'Enea Bastianini',team:'Tech3 KTM',points:'9'},{position:'8',name:'Jorge Martín',team:'Aprilia Racing',points:'8'},{position:'9',name:'Brad Binder',team:'Red Bull KTM',points:'7'},{position:'10',name:'Luca Marini',team:'Honda HRC',points:'6'}]};
     res.json({race:lastRace,results:hc[lastRace.idEvent]||[]});
   }catch(e){res.status(500).json({error:e.message});}
@@ -690,7 +733,7 @@ app.get('/sport/motogp/race/:round/sprint',(req,res)=>{
 
 app.get('/sport/motogp/live',async(req,res)=>{try{const todayStr=new Date().toISOString().slice(0,10);const live=MOTOGP_2026.find(r=>r.dateEvent===todayStr);if(!live)return res.json({live:false});const dateStr=live.dateEvent.replace(/-/g,'');const urls=[`https://site.web.api.espn.com/apis/site/v2/sports/racing/motogp/scoreboard?dates=${dateStr}`,`https://site.web.api.espn.com/apis/v2/sports/racing/motogp/scoreboard`];for(const url of urls){try{const r=await axios.get(url,{timeout:10000});const events=r.data?.events||[];for(const ev of events){const comps=ev.competitions?.[0]?.competitors||[];if(!comps.length)continue;const positions=comps.sort((a,b)=>(a.order||99)-(b.order||99)).slice(0,20).map((c,i)=>({pos:c.order||i+1,name:c.athlete?.displayName||c.team?.displayName||'',team:c.team?.name||'',gap:c.linescores?.[0]?.value||''}));if(positions.length)return res.json({live:true,race:ev.name||live.strEvent,positions});}}catch{}}res.json({live:true,race:live.strEvent,positions:[],note:'Gara in corso — dati non ancora disponibili.'});}catch(e){res.status(500).json({error:e.message});}});
 
-app.get('/sport/motogp/news',async(req,res)=>{try{const feeds=['https://news.google.com/rss/search?q=MotoGP&hl=it&gl=IT&ceid=IT:it','https://www.motosprint.it/feed/'];const items=[];for(const url of feeds){try{const r=await axios.get(url,{timeout:8000,headers:{'User-Agent':'Mozilla/5.0'}});const xml=r.data.toString();const itemRx=/<item>([\s\S]*?)<\/item>/g;let m;while((m=itemRx.exec(xml))!==null&&items.length<15){const b=m[1];const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/${tag}>`,'i'));return x?x[1].replace(/<[^>]+>/g,'').trim():null;};const title=getTag('title'),linkM=b.match(/<link\s*\/?>\s*([^<]*)<\/link>/i)||b.match(/<guid[^>]*>([^<]*)<\/guid>/i),pub=getTag('pubDate');const link=linkM?linkM[1].trim():null;const src=url.includes('google')?getTag('source')||'Google News':'Motosprint';if(title&&link)items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:src});}if(items.length>=8)break;}catch{}}res.json({items:items.slice(0,15)});}catch(e){res.status(500).json({error:e.message});}});
+app.get('/sport/motogp/news',async(req,res)=>{try{const feeds=['https://news.google.com/rss/search?q=MotoGP&hl=it&gl=IT&ceid=IT:it','https://www.motosprint.it/feed/'];const items=[];for(const url of feeds){try{const r=await axios.get(url,{timeout:8000,headers:{'User-Agent':'Mozilla/5.0'}});const xml=r.data.toString();const itemRx=/<item>([\s\S]*?)<\/item>/g;let m;while((m=itemRx.exec(xml))!==null&&items.length<20){const b=m[1];const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/${tag}>`,'i'));return x?x[1].replace(/<[^>]+>/g,'').trim():null;};const title=getTag('title'),linkM=b.match(/<link\s*\/?>\s*([^<]*)<\/link>/i)||b.match(/<guid[^>]*>([^<]*)<\/guid>/i),pub=getTag('pubDate');const link=linkM?linkM[1].trim():null;const src=url.includes('google')?getTag('source')||'Google News':'Motosprint';if(title&&link&&!isPaywall(src))items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:src});}if(items.length>=8)break;}catch{}}res.json({items:items.slice(0,15)});}catch(e){res.status(500).json({error:e.message});}});
 
 // AVVIO
 const PORT=process.env.PORT||10000;
