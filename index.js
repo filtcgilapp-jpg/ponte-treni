@@ -660,9 +660,26 @@ app.get('/sport/motogp/table',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// ── CLASSIFICA TEAM — aggiornare dopo ogni GP ──────────────────────────────────
-// team_riders: i due piloti per ogni team (aiuta la UI a mostrare i nomi)
-app.get('/sport/motogp/constructors',(req,res)=>{
+// ── CLASSIFICA TEAM — PulseLive primary, hardcoded fallback ────────────────────
+app.get('/sport/motogp/constructors',async(req,res)=>{
+  const year=new Date().getFullYear();
+  // PulseLive team standings
+  for(const type of['team','constructor']){
+    try{
+      const pl=await cGet(`${PULSE}/standings?seasonYear=${year}&categoryId=${MOTO_CAT}&type=${type}`,900000);
+      const cls=pl?.classification||pl?.standings||[];
+      if(cls.length>0){
+        const list=cls.map((e,i)=>({
+          position:String(e.position||i+1),
+          constructor:e.team?.name||e.constructor?.name||e.name||'',
+          points:String(e.points||0),
+          team_riders:(e.riders||e.team_riders||[]).map(r=>r.full_name||r.name||r).filter(Boolean),
+        })).filter(e=>e.constructor);
+        if(list.length>0)return res.json({constructors:list,season:String(year),source:`pulselive-${type}`});
+      }
+    }catch{}
+  }
+  // Hardcoded fallback R8
   res.json({constructors:[
     {position:'1', constructor:'Aprilia Racing',              team_riders:['Marco Bezzecchi','Jorge Martín'],              points:'340'},
     {position:'2', constructor:'Ducati Lenovo Team',          team_riders:['Marc Márquez','Francesco Bagnaia'],            points:'207'},
