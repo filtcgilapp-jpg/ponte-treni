@@ -614,7 +614,17 @@ app.get('/sport/motogp/table',async(req,res)=>{
         if(list.reduce((s,e)=>s+parseFloat(e.intPoints||0),0)>0)return res.json({table:list,season:'2026',source:'espn'});
       }
     }catch{}
-    // Wikipedia secondary
+    // PulseLive secondary
+    try{
+      const year=new Date().getFullYear();
+      const pl=await cGet(`${PULSE}/standings?seasonYear=${year}&categoryId=${MOTO_CAT}`,900000);
+      const cls=pl?.classification||[];
+      if(cls.length>0){
+        const list=cls.map(e=>({intRank:String(e.position||0),strTeam:e.rider?.full_name||'',strNation:e.team?.name||'',intPoints:String(e.points||0),intPlayed:String(e.total_participated_races||0)}));
+        if(list.reduce((s,e)=>s+parseFloat(e.intPoints||0),0)>0)return res.json({table:list,season:String(year),source:'pulselive'});
+      }
+    }catch{}
+    // Wikipedia tertiary
     try{
       const wr=await axios.get('https://en.wikipedia.org/w/api.php?action=parse&page=2026_MotoGP_World_Championship&prop=wikitext&section=0&format=json&origin=*',{timeout:6000});
       const wt=wr.data?.parse?.wikitext?.['*']||'';
@@ -669,7 +679,38 @@ app.get('/sport/motogp/constructors',(req,res)=>{
   ],season:'2026',note:'dopo Italian GP R8 — Mugello 31 mag 2026'});
 });
 
-// helper ESPN — tenta più URL per ottenere risultati di una gara MotoGP per data
+// ── MotoGP risultati gara — PulseLive (API ufficiale) + ESPN fallback ──────────
+const MOTO_CAT='e8c110ad-64aa-4e8e-8a86-f2f152f6a942'; // categoryId MotoGP class
+const PULSE='https://api.motogp.pulselive.com/motogp/v1/results';
+
+async function pulseEvents(year){
+  return cGet(`${PULSE}/events?seasonYear=${year}`,3*3600000);
+}
+async function pulseRaceResults(dateEvent){
+  const target=dateEvent.slice(0,10);
+  const year=target.slice(0,4);
+  try{
+    const evData=await pulseEvents(year);
+    const ev=(evData?.events||[]).find(e=>{
+      const s=(e.date_start||'').slice(0,10), en=(e.date_end||e.date_start||'').slice(0,10);
+      return target>=s&&target<=en;
+    });
+    if(!ev)return null;
+    const sesData=await cGet(`${PULSE}/sessions?eventId=${ev.id}&categoryId=${MOTO_CAT}`,3*3600000);
+    const rac=(sesData?.sessions||[]).find(s=>/^RAC$/i.test(s.type||s.session_type||''));
+    if(!rac)return null;
+    const resData=await cGet(`${PULSE}/session/${rac.id}`,3*3600000);
+    const cls=resData?.classification||[];
+    if(!cls.length)return null;
+    return cls.slice(0,10).map(r=>({
+      position:String(r.position||0),
+      name:r.rider?.full_name||'',
+      team:r.team?.name||'',
+      points:String(r.points||''),
+    }));
+  }catch{return null;}
+}
+
 async function espnMotoResults(dateEvent){
   const d0=new Date(dateEvent);const d1=new Date(d0);d1.setDate(d1.getDate()+1);
   const ds=d0.toISOString().slice(0,10).replace(/-/g,'');
@@ -688,6 +729,13 @@ async function espnMotoResults(dateEvent){
   return null;
 }
 
+// PulseLive primary, ESPN fallback
+async function motoRaceResults(dateEvent){
+  const pl=await pulseRaceResults(dateEvent).catch(()=>null);
+  if(pl?.length)return pl;
+  return espnMotoResults(dateEvent).catch(()=>null);
+}
+
 // ── GARE PASSATE — aggiornare knownResults dopo ogni GP ────────────────────────
 app.get('/sport/motogp/past',async(req,res)=>{
   try{
@@ -703,7 +751,7 @@ app.get('/sport/motogp/past',async(req,res)=>{
   // Per i round senza dati statici, tenta ESPN in real-time
   const enriched=await Promise.all(past.map(async r=>{
     if(knownResults[r.idEvent]!==undefined)return{...r,results:knownResults[r.idEvent]};
-    const res=await espnMotoResults(r.dateEvent).catch(()=>null);
+    const res=await motoRaceResults(r.dateEvent).catch(()=>null);
     return{...r,results:res||[]};
   }));
   res.json({races:enriched});
@@ -716,7 +764,7 @@ app.get('/sport/motogp/last',async(req,res)=>{
     const past=MOTOGP_2026.filter(r=>r.dateEvent<todayStr).sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent));
     if(!past.length)return res.json({race:null,results:[]});
     const lastRace=past[0];
-    try{const espnRes=await espnMotoResults(lastRace.dateEvent);if(espnRes?.length)return res.json({race:lastRace,results:espnRes});}catch{}
+    try{const r=await motoRaceResults(lastRace.dateEvent);if(r?.length)return res.json({race:lastRace,results:r});}catch{}
     const hc={
       'moto2026_1':[{position:'1',name:'Marco Bezzecchi',team:'Aprilia Racing',points:'25'},{position:'2',name:'Pedro Acosta',team:'Red Bull KTM Factory Racing',points:'20'},{position:'3',name:'Raúl Fernández',team:'Aprilia Trackhouse Racing',points:'16'}],
       'moto2026_2':[{position:'1',name:'Pedro Acosta',team:'Red Bull KTM Factory Racing',points:'25'},{position:'2',name:'Jorge Martín',team:'Aprilia Racing',points:'20'},{position:'3',name:'Marco Bezzecchi',team:'Aprilia Racing',points:'16'}],
