@@ -564,7 +564,7 @@ app.get('/sport/f1/race/:round/results',async(req,res)=>{try{
 // Sprint F1 — da Jolpica automaticamente (3 sprint nel 2026: Miami R6, Austria R11, Qatar R23)
 app.get('/sport/f1/race/:round/sprint',async(req,res)=>{try{const round=req.params.round;const d=await ergast(`/${F1Y}/${round}/sprint`,300000).catch(()=>null);const sr=d?.MRData?.RaceTable?.Races?.[0]?.SprintResults||[];if(sr.length>0)return res.json({results:sr.slice(0,20).map(r=>({position:r.position,driver:`${r.Driver?.givenName||''} ${r.Driver?.familyName||''}`.trim(),constructor:r.Constructor?.name||'',points:r.points||'0',time:r.Time?.time||r.status||''})),raceName:d?.MRData?.RaceTable?.Races?.[0]?.raceName||''});res.status(404).json({error:`Nessuna sprint per round ${round}`});}catch(e){res.status(500).json({error:e.message});}});
 
-const NEWS_PAYWALL=['motorsport.com','motorsport','oa sport','oasport','oasport.it','moto.it','paddock-live','motormaniacs','gpone.com'];
+const NEWS_PAYWALL=['motorsport.com','motorsport','oa sport','oasport','oasport.it','moto.it','paddock-live','motormaniacs','gpone.com','gazzetta','gazzettadelsport'];
 const isPaywall=src=>NEWS_PAYWALL.some(b=>(src||'').toLowerCase().includes(b));
 app.get('/sport/f1/news',async(req,res)=>{try{const feeds=['https://news.google.com/rss/search?q=Formula+1&hl=it&gl=IT&ceid=IT:it','https://www.formulapassion.it/feed/'];const items=[];for(const url of feeds){try{const r=await axios.get(url,{timeout:8000,headers:{'User-Agent':'Mozilla/5.0'}});const xml=r.data.toString();const itemRx=/<item>([\s\S]*?)<\/item>/g;let m;while((m=itemRx.exec(xml))!==null&&items.length<20){const b=m[1];const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/${tag}>`,'i'));return x?x[1].replace(/<[^>]+>/g,'').trim():null;};const title=getTag('title'),linkM=b.match(/<link\s*\/?>\s*([^<]*)<\/link>/i)||b.match(/<guid[^>]*>([^<]*)<\/guid>/i),pub=getTag('pubDate');const link=linkM?linkM[1].trim():null;const src=url.includes('google')?getTag('source')||'Google News':'FormulaPassion';if(title&&link&&!isPaywall(src))items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:src});}if(items.length>=8)break;}catch{}}res.json({items:items.slice(0,15)});}catch(e){res.status(500).json({error:e.message});}});
 
@@ -697,26 +697,41 @@ app.get('/sport/motogp/constructors',async(req,res)=>{
 });
 
 // ── MotoGP risultati gara — PulseLive (API ufficiale) + ESPN fallback ──────────
-const MOTO_CAT='e8c110ad-64aa-4e8e-8a86-f2f152f6a942'; // categoryId MotoGP class
+const MOTO_CAT='e8c110ad-64aa-4e8e-8a86-f2f152f6a942';
 const PULSE='https://api.motogp.pulselive.com/motogp/v1/results';
+const PULSE_SEASON_UUID={
+  2026:'e88b4e43-2209-47aa-8e83-0e0b1cedde6e',
+  2025:'ae6c6f0d-c652-44f8-94aa-420fc5b3dab4',
+};
 
-async function pulseEvents(year){
-  return cGet(`${PULSE}/events?seasonYear=${year}`,3*3600000);
+async function pulseSeasonUuid(year){
+  if(PULSE_SEASON_UUID[year])return PULSE_SEASON_UUID[year];
+  const s=await cGet(`${PULSE}/seasons`,86400000);
+  const found=(Array.isArray(s)?s:[]).find(x=>x.year===year);
+  if(found?.id)PULSE_SEASON_UUID[year]=found.id;
+  return found?.id||null;
 }
-async function pulseSessionResults(dateEvent, sessionTypeRx){
+async function pulseEvents(year){
+  const uuid=await pulseSeasonUuid(year);
+  if(!uuid)return[];
+  const data=await cGet(`${PULSE}/events?seasonUuid=${uuid}`,3*3600000);
+  return Array.isArray(data)?data:[];
+}
+async function pulseSessionResults(dateEvent,sessionTypeRx){
   const target=dateEvent.slice(0,10);
-  const year=target.slice(0,4);
+  const year=parseInt(target.slice(0,4));
   try{
-    const evData=await pulseEvents(year);
-    const ev=(evData?.events||[]).find(e=>{
-      const s=(e.date_start||'').slice(0,10), en=(e.date_end||e.date_start||'').slice(0,10);
+    const events=await pulseEvents(year);
+    const ev=events.find(e=>{
+      const s=(e.date_start||'').slice(0,10),en=(e.date_end||e.date_start||'').slice(0,10);
       return target>=s&&target<=en;
     });
     if(!ev)return null;
-    const sesData=await cGet(`${PULSE}/sessions?eventId=${ev.id}&categoryId=${MOTO_CAT}`,3*3600000);
-    const ses=(sesData?.sessions||[]).find(s=>sessionTypeRx.test(s.type||s.session_type||''));
+    const sessions=await cGet(`${PULSE}/sessions?eventUuid=${ev.id}&categoryUuid=${MOTO_CAT}`,3*3600000);
+    const sessArr=Array.isArray(sessions)?sessions:[];
+    const ses=sessArr.find(s=>sessionTypeRx.test(s.type||''));
     if(!ses)return null;
-    const resData=await cGet(`${PULSE}/session/${ses.id}`,3*3600000);
+    const resData=await cGet(`${PULSE}/session/${ses.id}/classification`,3*3600000);
     const cls=resData?.classification||[];
     if(!cls.length)return null;
     return cls.slice(0,10).map(r=>({
@@ -728,7 +743,7 @@ async function pulseSessionResults(dateEvent, sessionTypeRx){
   }catch{return null;}
 }
 async function pulseRaceResults(dateEvent){return pulseSessionResults(dateEvent,/^RAC$/i);}
-async function pulseSprintResults(dateEvent){return pulseSessionResults(dateEvent,/^SPR(INT)?$/i);}
+async function pulseSprintResults(dateEvent){return pulseSessionResults(dateEvent,/^SPR$/i);}
 
 async function espnMotoResults(dateEvent){
   const d0=new Date(dateEvent);const d1=new Date(d0);d1.setDate(d1.getDate()+1);
