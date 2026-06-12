@@ -1075,6 +1075,7 @@ const F1Y=new Date().getFullYear();
 // ── OpenF1 helper (live + recenti, nessuna auth) ─────────────────────────────
 async function openf1(path,ttl=60000){
   const r=await axios.get('https://api.openf1.org/v1'+path,{timeout:15000});
+  if(r.status===401) throw new Error('openf1 auth required');
   return r.data;
 }
 
@@ -1314,8 +1315,9 @@ app.get('/sport/f1/past',async(req,res)=>{
 // ── F1 Live (sessione corrente) ───────────────────────────────────────────────
 app.get('/sport/f1/live',async(req,res)=>{
   try{
-    // Ultima sessione (può essere live)
-    const sessions=await openf1('/sessions?session_key=latest',30000);
+    // Ultima sessione (può essere live) — openf1 ora richiede auth, fallback silenzioso
+    let sessions=null;
+    try{ sessions=await openf1('/sessions?session_key=latest',30000); }catch{ return res.json({live:false}); }
     if(!sessions||sessions.length===0) return res.json({live:false});
     const sess=sessions[0];
     const now=new Date();
@@ -1326,10 +1328,13 @@ app.get('/sport/f1/live',async(req,res)=>{
     if(!isLive) return res.json({live:false,session:sess.session_name,meeting:sess.meeting_name});
 
     // Posizioni live
-    const [posArr,drvArr]=await Promise.all([
-      openf1('/position?session_key=latest',5000),
-      openf1(`/drivers?session_key=${sess.session_key}`,3600000),
-    ]);
+    let posArr=[],drvArr=[];
+    try{
+      [posArr,drvArr]=await Promise.all([
+        openf1('/position?session_key=latest',5000),
+        openf1(`/drivers?session_key=${sess.session_key}`,3600000),
+      ]);
+    }catch{}
     const finals={};
     for(const p of (posArr||[])){if(!finals[p.driver_number]||p.date>finals[p.driver_number].date) finals[p.driver_number]=p;}
     const sorted=Object.values(finals).sort((a,b)=>a.position-b.position);
@@ -1445,11 +1450,11 @@ const MOTOGP_2026=[
   {round:1, strEvent:'Thai GP',       dateEvent:'2026-03-01',strVenue:'Chang International Circuit',           strCountry:'THA'},
   {round:2, strEvent:'Brazilian GP',  dateEvent:'2026-03-22',strVenue:'Autódromo Internacional Ayrton Senna', strCountry:'BRA'},
   {round:3, strEvent:'Americas GP',   dateEvent:'2026-03-29',strVenue:'Circuit of the Americas',               strCountry:'USA'},
-  {round:4, strEvent:'Qatar GP',      dateEvent:'2026-04-12',strVenue:'Lusail International Circuit',          strCountry:'QAT'},
-  {round:5, strEvent:'Spanish GP',    dateEvent:'2026-04-26',strVenue:'Circuito de Jerez – Ángel Nieto',       strCountry:'ESP'},
-  {round:6, strEvent:'French GP',     dateEvent:'2026-05-10',strVenue:'Bugatti Circuit',                       strCountry:'FRA'},
-  {round:7, strEvent:'Catalan GP',    dateEvent:'2026-05-17',strVenue:'Circuit de Barcelona-Catalunya',        strCountry:'CAT'},
-  {round:8, strEvent:'Italian GP',    dateEvent:'2026-05-31',strVenue:'Autodromo Internazionale del Mugello',  strCountry:'ITA'},
+  {round:4, strEvent:'Spanish GP',    dateEvent:'2026-04-26',strVenue:'Circuito de Jerez – Ángel Nieto',       strCountry:'ESP'},
+  {round:5, strEvent:'French GP',     dateEvent:'2026-05-10',strVenue:'Bugatti Circuit',                       strCountry:'FRA'},
+  {round:6, strEvent:'Catalan GP',    dateEvent:'2026-05-17',strVenue:'Circuit de Barcelona-Catalunya',        strCountry:'CAT'},
+  {round:7, strEvent:'Italian GP',    dateEvent:'2026-05-31',strVenue:'Autodromo Internazionale del Mugello',  strCountry:'ITA'},
+  {round:8, strEvent:'Hungarian GP',  dateEvent:'2026-06-07',strVenue:'Balaton Park Circuit',                  strCountry:'HUN'},
   {round:9, strEvent:'German GP',     dateEvent:'2026-06-14',strVenue:'Sachsenring',                           strCountry:'GER'},
   {round:10,strEvent:'Dutch GP',      dateEvent:'2026-06-28',strVenue:'TT Circuit Assen',                      strCountry:'NED'},
   {round:11,strEvent:'Finnish GP',    dateEvent:'2026-07-05',strVenue:'KymiRing',                              strCountry:'FIN'},
@@ -1494,29 +1499,33 @@ app.get('/sport/motogp/table',async(req,res)=>{
         if(standings.length>0) return res.json({table:standings,season:String(y)});
       }
     }catch{}
-    // Hardcoded aggiornato dopo Spanish GP R4 (Jerez, 27 apr 2026)
+    // Hardcoded aggiornato dopo Hungarian GP R8 (Balaton Park, 7 giu 2026)
     return res.json({table:[
-      {intRank:'1', strTeam:'Marco Bezzecchi',        strNation:'Aprilia Racing',      intPoints:'101',intPlayed:'4'},
-      {intRank:'2', strTeam:'Jorge Martín',            strNation:'Aprilia Racing',      intPoints:'90', intPlayed:'4'},
-      {intRank:'3', strTeam:'Fabio Di Giannantonio',   strNation:'Pertamina VR46',      intPoints:'71', intPlayed:'4'},
-      {intRank:'4', strTeam:'Pedro Acosta',            strNation:'Red Bull KTM',        intPoints:'66', intPlayed:'4'},
-      {intRank:'5', strTeam:'Marc Márquez',            strNation:'Ducati Lenovo',       intPoints:'57', intPlayed:'4'},
-      {intRank:'6', strTeam:'Raúl Fernández',          strNation:'Trackhouse Aprilia',  intPoints:'54', intPlayed:'4'},
-      {intRank:'7', strTeam:'Alex Márquez',            strNation:'BK8 Gresini Ducati',  intPoints:'53', intPlayed:'4'},
-      {intRank:'8', strTeam:'Ai Ogura',                strNation:'Trackhouse Aprilia',  intPoints:'48', intPlayed:'4'},
-      {intRank:'9', strTeam:'Francesco Bagnaia',       strNation:'Ducati Lenovo',       intPoints:'34', intPlayed:'4'},
-      {intRank:'10',strTeam:'Enea Bastianini',         strNation:'Tech3 KTM',           intPoints:'30', intPlayed:'4'},
-      {intRank:'11',strTeam:'Brad Binder',             strNation:'Red Bull KTM',        intPoints:'28', intPlayed:'4'},
-      {intRank:'12',strTeam:'Luca Marini',             strNation:'Honda HRC',           intPoints:'27', intPlayed:'4'},
-      {intRank:'13',strTeam:'Franco Morbidelli',       strNation:'Pertamina VR46',      intPoints:'25', intPlayed:'4'},
-      {intRank:'14',strTeam:'Johann Zarco',            strNation:'Castrol Honda LCR',   intPoints:'24', intPlayed:'4'},
-      {intRank:'15',strTeam:'Fermin Aldeguer',         strNation:'BK8 Gresini Ducati',  intPoints:'20', intPlayed:'4'},
-      {intRank:'16',strTeam:'Fabio Quartararo',        strNation:'Monster Yamaha',      intPoints:'11', intPlayed:'4'},
-      {intRank:'17',strTeam:'Diogo Moreira',           strNation:'Pro Honda LCR',       intPoints:'9',  intPlayed:'4'},
-      {intRank:'18',strTeam:'Joan Mir',                strNation:'Honda HRC',           intPoints:'4',  intPlayed:'4'},
-      {intRank:'19',strTeam:'Alex Rins',               strNation:'Monster Yamaha',      intPoints:'3',  intPlayed:'4'},
-      {intRank:'20',strTeam:'Toprak Razgatlioglu',     strNation:'Pramac Yamaha',       intPoints:'1',  intPlayed:'4'},
-    ],season:'2026',note:'dopo Spanish GP R4'});
+      {intRank:'1', strTeam:'Marco Bezzecchi',        strNation:'Aprilia Racing',             intPoints:'180',intPlayed:'8'},
+      {intRank:'2', strTeam:'Jorge Martín',            strNation:'Aprilia Racing',             intPoints:'160',intPlayed:'8'},
+      {intRank:'3', strTeam:'Fabio Di Giannantonio',   strNation:'Pertamina Enduro VR46',      intPoints:'138',intPlayed:'8'},
+      {intRank:'4', strTeam:'Pedro Acosta',            strNation:'Red Bull KTM',               intPoints:'132',intPlayed:'8'},
+      {intRank:'5', strTeam:'Marc Márquez',            strNation:'Ducati Lenovo',              intPoints:'108',intPlayed:'8'},
+      {intRank:'6', strTeam:'Ai Ogura',                strNation:'Trackhouse Aprilia',         intPoints:'105',intPlayed:'8'},
+      {intRank:'7', strTeam:'Francesco Bagnaia',       strNation:'Ducati Lenovo',              intPoints:'99', intPlayed:'8'},
+      {intRank:'8', strTeam:'Raúl Fernández',          strNation:'Trackhouse Aprilia',         intPoints:'93', intPlayed:'8'},
+      {intRank:'9', strTeam:'Álex Márquez',            strNation:'Gresini Racing',             intPoints:'67', intPlayed:'8'},
+      {intRank:'10',strTeam:'Fermín Aldeguer',         strNation:'Gresini Racing',             intPoints:'64', intPlayed:'8'},
+      {intRank:'11',strTeam:'Luca Marini',             strNation:'Castrol Honda',              intPoints:'57', intPlayed:'8'},
+      {intRank:'12',strTeam:'Enea Bastianini',         strNation:'Red Bull KTM Tech3',         intPoints:'48', intPlayed:'8'},
+      {intRank:'13',strTeam:'Brad Binder',             strNation:'Red Bull KTM',               intPoints:'48', intPlayed:'8'},
+      {intRank:'14',strTeam:'Franco Morbidelli',       strNation:'Pertamina Enduro VR46',      intPoints:'40', intPlayed:'8'},
+      {intRank:'15',strTeam:'Fabio Quartararo',        strNation:'Monster Energy Yamaha',      intPoints:'37', intPlayed:'8'},
+      {intRank:'16',strTeam:'Diogo Moreira',           strNation:'LCR Honda',                  intPoints:'36', intPlayed:'8'},
+      {intRank:'17',strTeam:'Johann Zarco',            strNation:'LCR Honda',                  intPoints:'34', intPlayed:'8'},
+      {intRank:'18',strTeam:'Joan Mir',                strNation:'Castrol Honda',              intPoints:'15', intPlayed:'8'},
+      {intRank:'19',strTeam:'Álex Rins',               strNation:'Monster Energy Yamaha',      intPoints:'12', intPlayed:'8'},
+      {intRank:'20',strTeam:'Jack Miller',             strNation:'Prima Pramac Racing',        intPoints:'11', intPlayed:'8'},
+      {intRank:'21',strTeam:'Iker Lecuona',            strNation:'Gresini Racing',             intPoints:'9',  intPlayed:'8'},
+      {intRank:'22',strTeam:'Toprak Razgatlioglu',     strNation:'Prima Pramac Racing',        intPoints:'9',  intPlayed:'8'},
+      {intRank:'23',strTeam:'Maverick Viñales',        strNation:'Red Bull KTM Tech3',         intPoints:'6',  intPlayed:'8'},
+      {intRank:'24',strTeam:'Augusto Fernández',       strNation:'Yamaha Factory Racing',      intPoints:'4',  intPlayed:'8'},
+    ],season:'2026',note:'dopo Hungarian GP R8'});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
@@ -1556,83 +1565,128 @@ app.get('/sport/motogp/last',async(req,res)=>{
         }
       }
     }catch{}
-    // Hardcoded per round 1-3
-    if(lastRace.round===1){
-      return res.json({race:lastRace,results:[
-        {position:'1',name:'Marco Bezzecchi',  abbr:'MB72',team:'Aprilia Racing',   points:'25'},
-        {position:'2',name:'Pedro Acosta',      abbr:'PA31',team:'Red Bull KTM',     points:'20'},
-        {position:'3',name:'Raul Fernandez',    abbr:'RF25',team:'Trackhouse Aprilia',points:'16'},
-        {position:'4',name:'Jorge Martín',      abbr:'JM89',team:'Aprilia Racing',   points:'13'},
-        {position:'5',name:'Ai Ogura',          abbr:'AO79',team:'Trackhouse Aprilia',points:'11'},
-        {position:'6',name:'Brad Binder',       abbr:'BB33',team:'Red Bull KTM',     points:'10'},
-        {position:'7',name:'Fabio Di Giannantonio',abbr:'FD49',team:'Pertamina VR46',points:'9'},
-        {position:'8',name:'Luca Marini',       abbr:'LM10',team:'Honda HRC',        points:'8'},
-        {position:'9',name:'Enea Bastianini',   abbr:'EB23',team:'GASGAS Tech3',     points:'7'},
-        {position:'10',name:'Maverick Viñales', abbr:'MV12',team:'GASGAS Tech3',     points:'6'},
-      ]});
-    }
-    if(lastRace.round===2){
-      return res.json({race:lastRace,results:[
-        {position:'1',name:'Pedro Acosta',       abbr:'PA31',team:'Red Bull KTM',      points:'25'},
-        {position:'2',name:'Jorge Martín',       abbr:'JM89',team:'Aprilia Racing',    points:'20'},
-        {position:'3',name:'Marco Bezzecchi',    abbr:'MB72',team:'Aprilia Racing',    points:'16'},
-        {position:'4',name:'Brad Binder',        abbr:'BB33',team:'Red Bull KTM',      points:'13'},
-        {position:'5',name:'Ai Ogura',           abbr:'AO79',team:'Trackhouse Aprilia',points:'11'},
-        {position:'6',name:'Raúl Fernández',     abbr:'RF25',team:'Trackhouse Aprilia',points:'10'},
-        {position:'7',name:'Marc Márquez',       abbr:'MM93',team:'Ducati Lenovo',     points:'9'},
-        {position:'8',name:'Fabio Di Giannantonio',abbr:'FD49',team:'Pertamina VR46', points:'8'},
-        {position:'9',name:'Francesco Bagnaia', abbr:'FB63',team:'Ducati Lenovo',     points:'7'},
-        {position:'10',name:'Enea Bastianini',  abbr:'EB23',team:'GASGAS Tech3',      points:'6'},
-      ]});
-    }
-    if(lastRace.round===3){
-      return res.json({race:lastRace,results:[
-        {position:'1',name:'Jorge Martín',       abbr:'JM89',team:'Aprilia Racing',    points:'25'},
-        {position:'2',name:'Pedro Acosta',       abbr:'PA31',team:'Red Bull KTM',      points:'20'},
-        {position:'3',name:'Marc Márquez',       abbr:'MM93',team:'Ducati Lenovo',     points:'16'},
-        {position:'4',name:'Ai Ogura',           abbr:'AO79',team:'Trackhouse Aprilia',points:'13'},
-        {position:'5',name:'Marco Bezzecchi',    abbr:'MB72',team:'Aprilia Racing',    points:'11'},
-        {position:'6',name:'Francesco Bagnaia', abbr:'FB63',team:'Ducati Lenovo',     points:'10'},
-        {position:'7',name:'Brad Binder',        abbr:'BB33',team:'Red Bull KTM',      points:'9'},
-        {position:'8',name:'Raúl Fernández',     abbr:'RF25',team:'Trackhouse Aprilia',points:'8'},
-        {position:'9',name:'Johann Zarco',       abbr:'JZ5', team:'LCR Honda',         points:'7'},
-        {position:'10',name:'Luca Marini',       abbr:'LM10',team:'Honda HRC',         points:'6'},
-      ]});
-    if(lastRace.round===4){
-      return res.json({race:lastRace,results:[
-       {position:'1', name:'Alex Márquez',          team:'BK8 Gresini Ducati', points:'25'},
-       {position:'2', name:'Marco Bezzecchi',       team:'Aprilia Racing',     points:'20'},
-       {position:'3', name:'Fabio Di Giannantonio', team:'Pertamina VR46',     points:'16'},
-       {position:'4', name:'Ai Ogura',              team:'Trackhouse Aprilia', points:'13'},
-       {position:'5', name:'Raúl Fernández',        team:'Trackhouse Aprilia', points:'11'},
-       {position:'6', name:'Johann Zarco',          team:'Castrol Honda LCR',  points:'10'},
-       {position:'7', name:'Enea Bastianini',       team:'Tech3 KTM',          points:'9'},
-       {position:'8', name:'Jorge Martín',          team:'Aprilia Racing',     points:'8'},
-       {position:'9', name:'Brad Binder',           team:'Red Bull KTM',       points:'7'},
-       {position:'10',name:'Luca Marini',           team:'Honda HRC',          points:'6'},
-      ]});
-      
-    }
+    // Hardcoded risultati gare 2026 aggiornato dopo Hungarian GP R8
+    const motoLastResults={
+      1:[
+        {position:'1',name:'Marco Bezzecchi',        abbr:'MB72',team:'Aprilia Racing',        points:'25'},
+        {position:'2',name:'Pedro Acosta',            abbr:'PA31',team:'Red Bull KTM',          points:'20'},
+        {position:'3',name:'Raúl Fernández',          abbr:'RF25',team:'Trackhouse Aprilia',    points:'16'},
+        {position:'4',name:'Jorge Martín',            abbr:'JM89',team:'Aprilia Racing',        points:'13'},
+        {position:'5',name:'Ai Ogura',                abbr:'AO79',team:'Trackhouse Aprilia',    points:'11'},
+        {position:'6',name:'Brad Binder',             abbr:'BB33',team:'Red Bull KTM',          points:'10'},
+        {position:'7',name:'Fabio Di Giannantonio',   abbr:'FD49',team:'Pertamina VR46',        points:'9'},
+        {position:'8',name:'Luca Marini',             abbr:'LM10',team:'Honda HRC',             points:'8'},
+        {position:'9',name:'Enea Bastianini',         abbr:'EB23',team:'Tech3 KTM',             points:'7'},
+        {position:'10',name:'Franco Morbidelli',      abbr:'FM21',team:'Pertamina VR46',        points:'6'},
+      ],
+      2:[
+        {position:'1',name:'Marco Bezzecchi',        abbr:'MB72',team:'Aprilia Racing',        points:'25'},
+        {position:'2',name:'Jorge Martín',            abbr:'JM89',team:'Aprilia Racing',        points:'20'},
+        {position:'3',name:'Fabio Di Giannantonio',   abbr:'FD49',team:'Pertamina VR46',        points:'16'},
+        {position:'4',name:'Pedro Acosta',            abbr:'PA31',team:'Red Bull KTM',          points:'13'},
+        {position:'5',name:'Ai Ogura',                abbr:'AO79',team:'Trackhouse Aprilia',    points:'11'},
+        {position:'6',name:'Raúl Fernández',          abbr:'RF25',team:'Trackhouse Aprilia',    points:'10'},
+        {position:'7',name:'Marc Márquez',            abbr:'MM93',team:'Ducati Lenovo',         points:'9'},
+        {position:'8',name:'Álex Márquez',            abbr:'AM73',team:'Gresini Racing',        points:'8'},
+        {position:'9',name:'Francesco Bagnaia',       abbr:'FB63',team:'Ducati Lenovo',         points:'7'},
+        {position:'10',name:'Brad Binder',            abbr:'BB33',team:'Red Bull KTM',          points:'6'},
+      ],
+      3:[
+        {position:'1',name:'Marco Bezzecchi',        abbr:'MB72',team:'Aprilia Racing',        points:'25'},
+        {position:'2',name:'Ai Ogura',                abbr:'AO79',team:'Trackhouse Aprilia',    points:'20'},
+        {position:'3',name:'Jorge Martín',            abbr:'JM89',team:'Aprilia Racing',        points:'16'},
+        {position:'4',name:'Pedro Acosta',            abbr:'PA31',team:'Red Bull KTM',          points:'13'},
+        {position:'5',name:'Raúl Fernández',          abbr:'RF25',team:'Trackhouse Aprilia',    points:'11'},
+        {position:'6',name:'Fabio Di Giannantonio',   abbr:'FD49',team:'Pertamina VR46',        points:'10'},
+        {position:'7',name:'Francesco Bagnaia',       abbr:'FB63',team:'Ducati Lenovo',         points:'9'},
+        {position:'8',name:'Brad Binder',             abbr:'BB33',team:'Red Bull KTM',          points:'8'},
+        {position:'9',name:'Johann Zarco',            abbr:'JZ5', team:'LCR Honda',             points:'7'},
+        {position:'10',name:'Luca Marini',            abbr:'LM10',team:'Honda HRC',             points:'6'},
+      ],
+      4:[
+        {position:'1',name:'Álex Márquez',           abbr:'AM73',team:'Gresini Racing',        points:'25'},
+        {position:'2',name:'Marco Bezzecchi',         abbr:'MB72',team:'Aprilia Racing',        points:'20'},
+        {position:'3',name:'Fabio Di Giannantonio',   abbr:'FD49',team:'Pertamina VR46',        points:'16'},
+        {position:'4',name:'Ai Ogura',                abbr:'AO79',team:'Trackhouse Aprilia',    points:'13'},
+        {position:'5',name:'Raúl Fernández',          abbr:'RF25',team:'Trackhouse Aprilia',    points:'11'},
+        {position:'6',name:'Johann Zarco',            abbr:'JZ5', team:'LCR Honda',             points:'10'},
+        {position:'7',name:'Enea Bastianini',         abbr:'EB23',team:'Tech3 KTM',             points:'9'},
+        {position:'8',name:'Jorge Martín',            abbr:'JM89',team:'Aprilia Racing',        points:'8'},
+        {position:'9',name:'Brad Binder',             abbr:'BB33',team:'Red Bull KTM',          points:'7'},
+        {position:'10',name:'Luca Marini',            abbr:'LM10',team:'Honda HRC',             points:'6'},
+      ],
+      5:[
+        {position:'1',name:'Jorge Martín',            abbr:'JM89',team:'Aprilia Racing',        points:'25'},
+        {position:'2',name:'Marco Bezzecchi',         abbr:'MB72',team:'Aprilia Racing',        points:'20'},
+        {position:'3',name:'Pedro Acosta',            abbr:'PA31',team:'Red Bull KTM',          points:'16'},
+        {position:'4',name:'Francesco Bagnaia',       abbr:'FB63',team:'Ducati Lenovo',         points:'13'},
+        {position:'5',name:'Fabio Di Giannantonio',   abbr:'FD49',team:'Pertamina VR46',        points:'11'},
+        {position:'6',name:'Ai Ogura',                abbr:'AO79',team:'Trackhouse Aprilia',    points:'10'},
+        {position:'7',name:'Marc Márquez',            abbr:'MM93',team:'Ducati Lenovo',         points:'9'},
+        {position:'8',name:'Raúl Fernández',          abbr:'RF25',team:'Trackhouse Aprilia',    points:'8'},
+        {position:'9',name:'Fermín Aldeguer',         abbr:'FA54',team:'Gresini Racing',        points:'7'},
+        {position:'10',name:'Luca Marini',            abbr:'LM10',team:'Honda HRC',             points:'6'},
+      ],
+      6:[
+        {position:'1',name:'Fabio Di Giannantonio',   abbr:'FD49',team:'Pertamina VR46',        points:'25'},
+        {position:'2',name:'Jorge Martín',            abbr:'JM89',team:'Aprilia Racing',        points:'20'},
+        {position:'3',name:'Marco Bezzecchi',         abbr:'MB72',team:'Aprilia Racing',        points:'16'},
+        {position:'4',name:'Pedro Acosta',            abbr:'PA31',team:'Red Bull KTM',          points:'13'},
+        {position:'5',name:'Marc Márquez',            abbr:'MM93',team:'Ducati Lenovo',         points:'11'},
+        {position:'6',name:'Francesco Bagnaia',       abbr:'FB63',team:'Ducati Lenovo',         points:'10'},
+        {position:'7',name:'Ai Ogura',                abbr:'AO79',team:'Trackhouse Aprilia',    points:'9'},
+        {position:'8',name:'Álex Márquez',            abbr:'AM73',team:'Gresini Racing',        points:'8'},
+        {position:'9',name:'Fermín Aldeguer',         abbr:'FA54',team:'Gresini Racing',        points:'7'},
+        {position:'10',name:'Brad Binder',            abbr:'BB33',team:'Red Bull KTM',          points:'6'},
+      ],
+      7:[
+        {position:'1',name:'Marco Bezzecchi',         abbr:'MB72',team:'Aprilia Racing',        points:'25'},
+        {position:'2',name:'Pedro Acosta',            abbr:'PA31',team:'Red Bull KTM',          points:'20'},
+        {position:'3',name:'Jorge Martín',            abbr:'JM89',team:'Aprilia Racing',        points:'16'},
+        {position:'4',name:'Francesco Bagnaia',       abbr:'FB63',team:'Ducati Lenovo',         points:'13'},
+        {position:'5',name:'Fabio Di Giannantonio',   abbr:'FD49',team:'Pertamina VR46',        points:'11'},
+        {position:'6',name:'Ai Ogura',                abbr:'AO79',team:'Trackhouse Aprilia',    points:'10'},
+        {position:'7',name:'Álex Márquez',            abbr:'AM73',team:'Gresini Racing',        points:'9'},
+        {position:'8',name:'Marc Márquez',            abbr:'MM93',team:'Ducati Lenovo',         points:'8'},
+        {position:'9',name:'Raúl Fernández',          abbr:'RF25',team:'Trackhouse Aprilia',    points:'7'},
+        {position:'10',name:'Fermín Aldeguer',        abbr:'FA54',team:'Gresini Racing',        points:'6'},
+      ],
+      8:[
+        {position:'1',name:'Marc Márquez',            abbr:'MM93',team:'Ducati Lenovo',         points:'25'},
+        {position:'2',name:'Jorge Martín',            abbr:'JM89',team:'Aprilia Racing',        points:'20'},
+        {position:'3',name:'Marco Bezzecchi',         abbr:'MB72',team:'Aprilia Racing',        points:'16'},
+        {position:'4',name:'Pedro Acosta',            abbr:'PA31',team:'Red Bull KTM',          points:'13'},
+        {position:'5',name:'Fabio Di Giannantonio',   abbr:'FD49',team:'Pertamina VR46',        points:'11'},
+        {position:'6',name:'Francesco Bagnaia',       abbr:'FB63',team:'Ducati Lenovo',         points:'10'},
+        {position:'7',name:'Álex Márquez',            abbr:'AM73',team:'Gresini Racing',        points:'9'},
+        {position:'8',name:'Ai Ogura',                abbr:'AO79',team:'Trackhouse Aprilia',    points:'8'},
+        {position:'9',name:'Raúl Fernández',          abbr:'RF25',team:'Trackhouse Aprilia',    points:'7'},
+        {position:'10',name:'Fermín Aldeguer',        abbr:'FA54',team:'Gresini Racing',        points:'6'},
+      ],
+    };
+    const r=motoLastResults[lastRace.round];
+    if(r) return res.json({race:lastRace,results:r});
     res.json({race:lastRace,results:[]});
   }catch(e){res.status(500).json({error:e.message});}
 });
 
 // ── MotoGP Gare passate stagione corrente ────────────────────────────────────
 app.get('/sport/motogp/constructors',async(req,res)=>{
-  // Classifica costruttori MotoGP 2026 dopo Americas GP (R3)
+  // Classifica costruttori MotoGP 2026 dopo Hungarian GP (R8)
   res.json({constructors:[
-    {position:'1',constructor:'Aprilia Racing',   points:'191'},
-    {position:'2',constructor:'Trackhouse Aprilia',points:'102'},
-    {position:'3',constructor:'Pertamina VR46',   points:'96'},
-    {position:'4',constructor:'Red Bull KTM',     points:'94'},     
-    {position:'5',constructor:'Ducati Lenovo',    points:'491'},
-    {position:'6',constructor:'BK8 Gresini Racing',  points:'33'},
-    {position:'7',constructor:'LCR Honda',        points:'33'},
-    {position:'8',constructor:'Honda HRC',        points:'31'},   
-    {position:'9',constructor:'Tech3 KTM',        points:'30'},    
-    {position:'10',constructor:'Monster Yamaha',   points:'14'},
-    {position:'11',constructor:'Prima Pramac Yamaha',   points:'1'},
-  ],season:'2026',note:'dopo Americas GP R3'});
+    {position:'1', constructor:'Aprilia Racing',          points:'340'},
+    {position:'2', constructor:'Ducati Lenovo',           points:'207'},
+    {position:'3', constructor:'Pertamina Enduro VR46',   points:'178'},
+    {position:'4', constructor:'Red Bull KTM',            points:'180'},
+    {position:'5', constructor:'Trackhouse Aprilia',      points:'198'},
+    {position:'6', constructor:'Gresini Racing',          points:'131'},
+    {position:'7', constructor:'LCR Honda',               points:'70'},
+    {position:'8', constructor:'Castrol Honda',           points:'72'},
+    {position:'9', constructor:'Red Bull KTM Tech3',      points:'54'},
+    {position:'10',constructor:'Monster Energy Yamaha',   points:'49'},
+    {position:'11',constructor:'Prima Pramac Racing',     points:'20'},
+    {position:'12',constructor:'Yamaha Factory Racing',   points:'4'},
+  ],season:'2026',note:'dopo Hungarian GP R8'});
 });
 
 app.get('/sport/motogp/past',async(req,res)=>{
@@ -1642,7 +1696,7 @@ app.get('/sport/motogp/past',async(req,res)=>{
     .sort((a,b)=>new Date(b.dateEvent)-new Date(a.dateEvent));
   const knownResults={
     'moto2026_1':[
-      {position:'1', name:'Marco Bezzecchi',       team:'Aprilia Racing',     points:'25'},
+      {position:'1', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'25'},
       {position:'2', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'20'},
       {position:'3', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'16'},
       {position:'4', name:'Jorge Martín',           team:'Aprilia Racing',     points:'13'},
@@ -1654,40 +1708,88 @@ app.get('/sport/motogp/past',async(req,res)=>{
       {position:'10',name:'Franco Morbidelli',      team:'Pertamina VR46',     points:'6'},
     ],
     'moto2026_2':[
-      {position:'1', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'25'},
+      {position:'1', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'25'},
       {position:'2', name:'Jorge Martín',           team:'Aprilia Racing',     points:'20'},
-      {position:'3', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'16'},
-      {position:'4', name:'Brad Binder',            team:'Red Bull KTM',       points:'13'},
+      {position:'3', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'16'},
+      {position:'4', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'13'},
       {position:'5', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'11'},
       {position:'6', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'10'},
       {position:'7', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'9'},
-      {position:'8', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'8'},
+      {position:'8', name:'Álex Márquez',           team:'Gresini Racing',     points:'8'},
       {position:'9', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'7'},
-      {position:'10',name:'Enea Bastianini',        team:'Tech3 KTM',          points:'6'},
+      {position:'10',name:'Brad Binder',            team:'Red Bull KTM',       points:'6'},
     ],
     'moto2026_3':[
-      {position:'1', name:'Jorge Martín',           team:'Aprilia Racing',     points:'25'},
-      {position:'2', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'20'},
-      {position:'3', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'16'},
-      {position:'4', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'13'},
-      {position:'5', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'11'},
-      {position:'6', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'10'},
-      {position:'7', name:'Brad Binder',            team:'Red Bull KTM',       points:'9'},
-      {position:'8', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'8'},
-      {position:'9', name:'Johann Zarco',           team:'Castrol Honda LCR',  points:'7'},
+      {position:'1', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'25'},
+      {position:'2', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'20'},
+      {position:'3', name:'Jorge Martín',           team:'Aprilia Racing',     points:'16'},
+      {position:'4', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'13'},
+      {position:'5', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'11'},
+      {position:'6', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'10'},
+      {position:'7', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'9'},
+      {position:'8', name:'Brad Binder',            team:'Red Bull KTM',       points:'8'},
+      {position:'9', name:'Johann Zarco',           team:'LCR Honda',          points:'7'},
       {position:'10',name:'Luca Marini',            team:'Honda HRC',          points:'6'},
     ],
-    'moto2026_4':[  // ← NUOVO: Spanish GP Jerez, 27 apr 2026
-      {position:'1', name:'Alex Márquez',           team:'BK8 Gresini Ducati', points:'25'},
+    'moto2026_4':[
+      {position:'1', name:'Álex Márquez',           team:'Gresini Racing',     points:'25'},
       {position:'2', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'20'},
       {position:'3', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'16'},
       {position:'4', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'13'},
       {position:'5', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'11'},
-      {position:'6', name:'Johann Zarco',           team:'Castrol Honda LCR',  points:'10'},
+      {position:'6', name:'Johann Zarco',           team:'LCR Honda',          points:'10'},
       {position:'7', name:'Enea Bastianini',        team:'Tech3 KTM',          points:'9'},
       {position:'8', name:'Jorge Martín',           team:'Aprilia Racing',     points:'8'},
       {position:'9', name:'Brad Binder',            team:'Red Bull KTM',       points:'7'},
       {position:'10',name:'Luca Marini',            team:'Honda HRC',          points:'6'},
+    ],
+    'moto2026_5':[
+      {position:'1', name:'Jorge Martín',           team:'Aprilia Racing',     points:'25'},
+      {position:'2', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'20'},
+      {position:'3', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'16'},
+      {position:'4', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'13'},
+      {position:'5', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'11'},
+      {position:'6', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'10'},
+      {position:'7', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'9'},
+      {position:'8', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'8'},
+      {position:'9', name:'Fermín Aldeguer',        team:'Gresini Racing',     points:'7'},
+      {position:'10',name:'Luca Marini',            team:'Honda HRC',          points:'6'},
+    ],
+    'moto2026_6':[
+      {position:'1', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'25'},
+      {position:'2', name:'Jorge Martín',           team:'Aprilia Racing',     points:'20'},
+      {position:'3', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'16'},
+      {position:'4', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'13'},
+      {position:'5', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'11'},
+      {position:'6', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'10'},
+      {position:'7', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'9'},
+      {position:'8', name:'Álex Márquez',           team:'Gresini Racing',     points:'8'},
+      {position:'9', name:'Fermín Aldeguer',        team:'Gresini Racing',     points:'7'},
+      {position:'10',name:'Brad Binder',            team:'Red Bull KTM',       points:'6'},
+    ],
+    'moto2026_7':[
+      {position:'1', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'25'},
+      {position:'2', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'20'},
+      {position:'3', name:'Jorge Martín',           team:'Aprilia Racing',     points:'16'},
+      {position:'4', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'13'},
+      {position:'5', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'11'},
+      {position:'6', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'10'},
+      {position:'7', name:'Álex Márquez',           team:'Gresini Racing',     points:'9'},
+      {position:'8', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'8'},
+      {position:'9', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'7'},
+      {position:'10',name:'Fermín Aldeguer',        team:'Gresini Racing',     points:'6'},
+    ],
+    'moto2026_8':[
+      {position:'1', name:'Marc Márquez',           team:'Ducati Lenovo',      points:'25'},
+      {position:'2', name:'Jorge Martín',           team:'Aprilia Racing',     points:'20'},
+      {position:'3', name:'Marco Bezzecchi',        team:'Aprilia Racing',     points:'16'},
+      {position:'4', name:'Pedro Acosta',           team:'Red Bull KTM',       points:'13'},
+      {position:'5', name:'Fabio Di Giannantonio',  team:'Pertamina VR46',     points:'11'},
+      {position:'6', name:'Francesco Bagnaia',      team:'Ducati Lenovo',      points:'10'},
+      {position:'7', name:'Álex Márquez',           team:'Gresini Racing',     points:'9'},
+      {position:'8', name:'Ai Ogura',               team:'Trackhouse Aprilia', points:'8'},
+      {position:'9', name:'Raúl Fernández',         team:'Trackhouse Aprilia', points:'7'},
+      {position:'10',name:'Fermín Aldeguer',        team:'Gresini Racing',     points:'6'},
     ],
   };
   const withResults=past.map(r=>({...r,results:knownResults[r.idEvent]||[]}));
@@ -2852,7 +2954,6 @@ app.get('/diag/cups/:slug',async(req,res)=>{
 app.get('/sport/f1/news',async(req,res)=>{
   try{
     const feeds=[
-      'https://it.motorsport.com/rss/f1/news/',
       'https://www.formulapassion.it/feed/',
       'https://www.motorionline.com/category/formula-1/feed/',
     ];
@@ -2867,7 +2968,7 @@ app.get('/sport/f1/news',async(req,res)=>{
           const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\/${tag}>`,'i'));return x?x[1].trim():null;};
           const title=getTag('title'); const link=getTag('link');
           const pub=getTag('pubDate');
-          if(title&&link) items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:url.includes('formulapassion')?'FormulaPassion':url.includes('motorionline')?'MotorOnline':'Motorsport IT'});
+          if(title&&link) items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:url.includes('formulapassion')?'FormulaPassion':'MotorOnline'});
         }
         if(items.length>=5) break;
       }catch{}
@@ -2879,7 +2980,6 @@ app.get('/sport/f1/news',async(req,res)=>{
 app.get('/sport/motogp/news',async(req,res)=>{
   try{
     const feeds=[
-      'https://it.motorsport.com/rss/motogp/news/',
       'https://www.motosprint.it/feed/',
       'https://www.motorionline.com/category/motogp/feed/',
     ];
@@ -2894,7 +2994,7 @@ app.get('/sport/motogp/news',async(req,res)=>{
           const getTag=tag=>{const x=b.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\/${tag}>`,'i'));return x?x[1].trim():null;};
           const title=getTag('title'); const link=getTag('link');
           const pub=getTag('pubDate');
-          if(title&&link) items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:url.includes('motosprint')?'Motosprint':'Motorsport'});
+          if(title&&link) items.push({title,link,pubDate:pub?new Date(pub).toISOString():null,source:url.includes('motosprint')?'Motosprint':'MotorOnline'});
         }
         if(items.length>=5) break;
       }catch{}
@@ -2989,111 +3089,105 @@ const PORT=process.env.PORT||10000;
 // MONDIALI 2026 — USA/Canada/Messico, 11 giu – 19 lug 2026
 // ══════════════════════════════════════════════════════════════════════════════
 const WC2026_GROUPS={
-  A:[{t:'Messico'},{t:'Corea del Sud'},{t:'Sudafrica'},{t:'Playoff D*'}],
-  B:[{t:'Canada'},{t:'Svizzera'},{t:'Qatar'},{t:'Playoff A*'}],
-  C:[{t:'Brasile'},{t:'Marocco'},{t:'Scozia'},{t:'Haiti'}],
-  D:[{t:'USA'},{t:'Australia'},{t:'Paraguay'},{t:'Playoff C*'}],
-  E:[{t:'Germania'},{t:'Ecuador'},{t:'Costa Avorio'},{t:'Curacao'}],
-  F:[{t:'Olanda'},{t:'Giappone'},{t:'Tunisia'},{t:'Playoff B*'}],
-  G:[{t:'Belgio'},{t:'Iran'},{t:'Egitto'},{t:'Nuova Zelanda'}],
-  H:[{t:'Spagna'},{t:'Uruguay'},{t:'Arabia Saudita'},{t:'Capo Verde'}],
-  I:[{t:'Francia'},{t:'Senegal'},{t:'Norvegia'},{t:'Playoff F*'}],
+  A:[{t:'Messico'},{t:'Sudafrica'},{t:'Corea del Sud'},{t:'Rep. Ceca'}],
+  B:[{t:'Canada'},{t:'Bosnia Erzegovina'},{t:'Qatar'},{t:'Svizzera'}],
+  C:[{t:'Brasile'},{t:'Marocco'},{t:'Haiti'},{t:'Scozia'}],
+  D:[{t:'USA'},{t:'Paraguay'},{t:'Australia'},{t:'Turchia'}],
+  E:[{t:'Germania'},{t:'Curacao'},{t:'Costa d\'Avorio'},{t:'Ecuador'}],
+  F:[{t:'Olanda'},{t:'Giappone'},{t:'Svezia'},{t:'Tunisia'}],
+  G:[{t:'Belgio'},{t:'Egitto'},{t:'Iran'},{t:'Nuova Zelanda'}],
+  H:[{t:'Spagna'},{t:'Capo Verde'},{t:'Arabia Saudita'},{t:'Uruguay'}],
+  I:[{t:'Francia'},{t:'Senegal'},{t:'Iraq'},{t:'Norvegia'}],
   J:[{t:'Argentina'},{t:'Algeria'},{t:'Austria'},{t:'Giordania'}],
-  K:[{t:'Portogallo'},{t:'Colombia'},{t:'Uzbekistan'},{t:'Playoff E*'}],
-  L:[{t:'Inghilterra'},{t:'Croazia'},{t:'Panama'},{t:'Ghana'}],
+  K:[{t:'Portogallo'},{t:'Congo DR'},{t:'Uzbekistan'},{t:'Colombia'}],
+  L:[{t:'Inghilterra'},{t:'Croazia'},{t:'Ghana'},{t:'Panama'}],
 };
-// * Playoff A = Italia/Irlanda del Nord/Galles/Bosnia
-// * Playoff B = Ucraina/Svezia/Polonia/Albania
-// * Playoff C = Turchia/Romania/Slovacchia/Kosovo
-// * Playoff D = Danimarca/Macedonia del Nord/Rep.Ceca/Irlanda
-// * Playoff E = Congo/Giamaica/Nuova Caledonia
-// * Playoff F = Bolivia/Suriname/Iraq
-// Partite gironi (date ufficiali parziali, alcune stimate)
+// Partite gironi — dati ufficiali FIFA World Cup 2026
 const WC2026_MATCHES=[
   // Girone A
-  {group:'A',date:'2026-06-11',home:'USA',away:'Marocco',homeScore:null,awayScore:null},
-  {group:'A',date:'2026-06-11',home:'Portogallo',away:'Egitto',homeScore:null,awayScore:null},
-  {group:'A',date:'2026-06-15',home:'USA',away:'Egitto',homeScore:null,awayScore:null},
-  {group:'A',date:'2026-06-15',home:'Marocco',away:'Portogallo',homeScore:null,awayScore:null},
-  {group:'A',date:'2026-06-19',home:'USA',away:'Portogallo',homeScore:null,awayScore:null},
-  {group:'A',date:'2026-06-19',home:'Egitto',away:'Marocco',homeScore:null,awayScore:null},
+  {group:'A',date:'2026-06-11',home:'Messico',away:'Sudafrica',homeScore:2,awayScore:0},
+  {group:'A',date:'2026-06-11',home:'Corea del Sud',away:'Rep. Ceca',homeScore:2,awayScore:1},
+  {group:'A',date:'2026-06-18',home:'Rep. Ceca',away:'Sudafrica',homeScore:null,awayScore:null},
+  {group:'A',date:'2026-06-18',home:'Messico',away:'Corea del Sud',homeScore:null,awayScore:null},
+  {group:'A',date:'2026-06-24',home:'Rep. Ceca',away:'Messico',homeScore:null,awayScore:null},
+  {group:'A',date:'2026-06-24',home:'Sudafrica',away:'Corea del Sud',homeScore:null,awayScore:null},
   // Girone B
-  {group:'B',date:'2026-06-12',home:'Argentina',away:'Cile',homeScore:null,awayScore:null},
-  {group:'B',date:'2026-06-12',home:'Messico',away:'Belgio',homeScore:null,awayScore:null},
-  {group:'B',date:'2026-06-16',home:'Argentina',away:'Belgio',homeScore:null,awayScore:null},
-  {group:'B',date:'2026-06-16',home:'Cile',away:'Messico',homeScore:null,awayScore:null},
-  {group:'B',date:'2026-06-20',home:'Argentina',away:'Messico',homeScore:null,awayScore:null},
-  {group:'B',date:'2026-06-20',home:'Belgio',away:'Cile',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-12',home:'Canada',away:'Bosnia Erzegovina',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-13',home:'Qatar',away:'Svizzera',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-18',home:'Svizzera',away:'Bosnia Erzegovina',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-18',home:'Canada',away:'Qatar',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-24',home:'Svizzera',away:'Canada',homeScore:null,awayScore:null},
+  {group:'B',date:'2026-06-24',home:'Bosnia Erzegovina',away:'Qatar',homeScore:null,awayScore:null},
   // Girone C
-  {group:'C',date:'2026-06-12',home:'Canada',away:'Senegal',homeScore:null,awayScore:null},
-  {group:'C',date:'2026-06-12',home:'Inghilterra',away:'Olanda',homeScore:null,awayScore:null},
-  {group:'C',date:'2026-06-16',home:'Inghilterra',away:'Senegal',homeScore:null,awayScore:null},
-  {group:'C',date:'2026-06-16',home:'Olanda',away:'Canada',homeScore:null,awayScore:null},
-  {group:'C',date:'2026-06-20',home:'Canada',away:'Inghilterra',homeScore:null,awayScore:null},
-  {group:'C',date:'2026-06-20',home:'Senegal',away:'Olanda',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-13',home:'Brasile',away:'Marocco',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-13',home:'Haiti',away:'Scozia',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-19',home:'Scozia',away:'Marocco',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-19',home:'Brasile',away:'Haiti',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-24',home:'Scozia',away:'Brasile',homeScore:null,awayScore:null},
+  {group:'C',date:'2026-06-24',home:'Marocco',away:'Haiti',homeScore:null,awayScore:null},
   // Girone D
-  {group:'D',date:'2026-06-13',home:'Francia',away:'Svizzera',homeScore:null,awayScore:null},
-  {group:'D',date:'2026-06-13',home:'Brasile',away:'Giappone',homeScore:null,awayScore:null},
-  {group:'D',date:'2026-06-17',home:'Brasile',away:'Svizzera',homeScore:null,awayScore:null},
-  {group:'D',date:'2026-06-17',home:'Giappone',away:'Francia',homeScore:null,awayScore:null},
-  {group:'D',date:'2026-06-21',home:'Brasile',away:'Francia',homeScore:null,awayScore:null},
-  {group:'D',date:'2026-06-21',home:'Svizzera',away:'Giappone',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-12',home:'USA',away:'Paraguay',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-13',home:'Australia',away:'Turchia',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-19',home:'USA',away:'Australia',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-19',home:'Turchia',away:'Paraguay',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-25',home:'Turchia',away:'USA',homeScore:null,awayScore:null},
+  {group:'D',date:'2026-06-25',home:'Paraguay',away:'Australia',homeScore:null,awayScore:null},
   // Girone E
-  {group:'E',date:'2026-06-13',home:'Spagna',away:'Algeria',homeScore:null,awayScore:null},
-  {group:'E',date:'2026-06-13',home:'Germania',away:'Canada',homeScore:null,awayScore:null},
-  {group:'E',date:'2026-06-17',home:'Spagna',away:'Canada',homeScore:null,awayScore:null},
-  {group:'E',date:'2026-06-17',home:'Algeria',away:'Germania',homeScore:null,awayScore:null},
-  {group:'E',date:'2026-06-21',home:'Spagna',away:'Germania',homeScore:null,awayScore:null},
-  {group:'E',date:'2026-06-21',home:'Canada',away:'Algeria',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-14',home:'Germania',away:'Curacao',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-14',home:'Costa d\'Avorio',away:'Ecuador',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-20',home:'Germania',away:'Costa d\'Avorio',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-20',home:'Ecuador',away:'Curacao',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-25',home:'Curacao',away:'Costa d\'Avorio',homeScore:null,awayScore:null},
+  {group:'E',date:'2026-06-25',home:'Ecuador',away:'Germania',homeScore:null,awayScore:null},
   // Girone F
-  {group:'F',date:'2026-06-14',home:'Colombia',away:'Nigeria',homeScore:null,awayScore:null},
-  {group:'F',date:'2026-06-14',home:'Uruguay',away:'Corea del Sud',homeScore:null,awayScore:null},
-  {group:'F',date:'2026-06-18',home:'Uruguay',away:'Nigeria',homeScore:null,awayScore:null},
-  {group:'F',date:'2026-06-18',home:'Corea del Sud',away:'Colombia',homeScore:null,awayScore:null},
-  {group:'F',date:'2026-06-22',home:'Uruguay',away:'Colombia',homeScore:null,awayScore:null},
-  {group:'F',date:'2026-06-22',home:'Nigeria',away:'Corea del Sud',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-14',home:'Olanda',away:'Giappone',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-14',home:'Svezia',away:'Tunisia',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-20',home:'Olanda',away:'Svezia',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-20',home:'Tunisia',away:'Giappone',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-25',home:'Giappone',away:'Svezia',homeScore:null,awayScore:null},
+  {group:'F',date:'2026-06-25',home:'Tunisia',away:'Olanda',homeScore:null,awayScore:null},
   // Girone G
-  {group:'G',date:'2026-06-14',home:'Ecuador',away:'Costa Rica',homeScore:null,awayScore:null},
-  {group:'G',date:'2026-06-14',home:'Polonia',away:'Australia',homeScore:null,awayScore:null},
-  {group:'G',date:'2026-06-18',home:'Polonia',away:'Costa Rica',homeScore:null,awayScore:null},
-  {group:'G',date:'2026-06-18',home:'Australia',away:'Ecuador',homeScore:null,awayScore:null},
-  {group:'G',date:'2026-06-22',home:'Polonia',away:'Ecuador',homeScore:null,awayScore:null},
-  {group:'G',date:'2026-06-22',home:'Costa Rica',away:'Australia',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-15',home:'Belgio',away:'Egitto',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-15',home:'Iran',away:'Nuova Zelanda',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-21',home:'Belgio',away:'Iran',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-21',home:'Nuova Zelanda',away:'Egitto',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-26',home:'Egitto',away:'Iran',homeScore:null,awayScore:null},
+  {group:'G',date:'2026-06-26',home:'Nuova Zelanda',away:'Belgio',homeScore:null,awayScore:null},
   // Girone H
-  {group:'H',date:'2026-06-15',home:'Italia',away:'Arabia Saudita',homeScore:null,awayScore:null},
-  {group:'H',date:'2026-06-15',home:'Turchia',away:'Messico',homeScore:null,awayScore:null},
-  {group:'H',date:'2026-06-19',home:'Italia',away:'Messico',homeScore:null,awayScore:null},
-  {group:'H',date:'2026-06-19',home:'Arabia Saudita',away:'Turchia',homeScore:null,awayScore:null},
-  {group:'H',date:'2026-06-23',home:'Italia',away:'Turchia',homeScore:null,awayScore:null},
-  {group:'H',date:'2026-06-23',home:'Messico',away:'Arabia Saudita',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-15',home:'Spagna',away:'Capo Verde',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-15',home:'Arabia Saudita',away:'Uruguay',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-21',home:'Spagna',away:'Arabia Saudita',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-21',home:'Uruguay',away:'Capo Verde',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-26',home:'Capo Verde',away:'Arabia Saudita',homeScore:null,awayScore:null},
+  {group:'H',date:'2026-06-26',home:'Uruguay',away:'Spagna',homeScore:null,awayScore:null},
   // Girone I
-  {group:'I',date:'2026-06-15',home:'Croazia',away:'Costa Avorio',homeScore:null,awayScore:null},
-  {group:'I',date:'2026-06-15',home:'Iran',away:'Qatar',homeScore:null,awayScore:null},
-  {group:'I',date:'2026-06-19',home:'Croazia',away:'Qatar',homeScore:null,awayScore:null},
-  {group:'I',date:'2026-06-19',home:'Iran',away:'Costa Avorio',homeScore:null,awayScore:null},
-  {group:'I',date:'2026-06-23',home:'Croazia',away:'Iran',homeScore:null,awayScore:null},
-  {group:'I',date:'2026-06-23',home:'Qatar',away:'Costa Avorio',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-16',home:'Francia',away:'Senegal',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-16',home:'Iraq',away:'Norvegia',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-22',home:'Francia',away:'Iraq',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-22',home:'Norvegia',away:'Senegal',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-26',home:'Norvegia',away:'Francia',homeScore:null,awayScore:null},
+  {group:'I',date:'2026-06-26',home:'Senegal',away:'Iraq',homeScore:null,awayScore:null},
   // Girone J
-  {group:'J',date:'2026-06-16',home:'Danimarca',away:'Venezuela',homeScore:null,awayScore:null},
-  {group:'J',date:'2026-06-16',home:'Camerun',away:'Arabia',homeScore:null,awayScore:null},
-  {group:'J',date:'2026-06-20',home:'Danimarca',away:'Arabia',homeScore:null,awayScore:null},
-  {group:'J',date:'2026-06-20',home:'Venezuela',away:'Camerun',homeScore:null,awayScore:null},
-  {group:'J',date:'2026-06-24',home:'Danimarca',away:'Camerun',homeScore:null,awayScore:null},
-  {group:'J',date:'2026-06-24',home:'Arabia',away:'Venezuela',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-16',home:'Argentina',away:'Algeria',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-16',home:'Austria',away:'Giordania',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-22',home:'Argentina',away:'Austria',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-22',home:'Giordania',away:'Algeria',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-27',home:'Algeria',away:'Austria',homeScore:null,awayScore:null},
+  {group:'J',date:'2026-06-27',home:'Giordania',away:'Argentina',homeScore:null,awayScore:null},
   // Girone K
-  {group:'K',date:'2026-06-16',home:'Serbia',away:'Nuova Zelanda',homeScore:null,awayScore:null},
-  {group:'K',date:'2026-06-16',home:'Perù',away:'Congo',homeScore:null,awayScore:null},
-  {group:'K',date:'2026-06-20',home:'Serbia',away:'Congo',homeScore:null,awayScore:null},
-  {group:'K',date:'2026-06-20',home:'Nuova Zelanda',away:'Perù',homeScore:null,awayScore:null},
-  {group:'K',date:'2026-06-24',home:'Serbia',away:'Perù',homeScore:null,awayScore:null},
-  {group:'K',date:'2026-06-24',home:'Congo',away:'Nuova Zelanda',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-17',home:'Portogallo',away:'Congo DR',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-17',home:'Uzbekistan',away:'Colombia',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-23',home:'Portogallo',away:'Uzbekistan',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-23',home:'Colombia',away:'Congo DR',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-27',home:'Colombia',away:'Portogallo',homeScore:null,awayScore:null},
+  {group:'K',date:'2026-06-27',home:'Congo DR',away:'Uzbekistan',homeScore:null,awayScore:null},
   // Girone L
-  {group:'L',date:'2026-06-17',home:'Austria',away:'Ghana',homeScore:null,awayScore:null},
-  {group:'L',date:'2026-06-17',home:'Ucraina',away:'Panama',homeScore:null,awayScore:null},
-  {group:'L',date:'2026-06-21',home:'Austria',away:'Panama',homeScore:null,awayScore:null},
-  {group:'L',date:'2026-06-21',home:'Ghana',away:'Ucraina',homeScore:null,awayScore:null},
-  {group:'L',date:'2026-06-25',home:'Austria',away:'Ucraina',homeScore:null,awayScore:null},
-  {group:'L',date:'2026-06-25',home:'Panama',away:'Ghana',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-17',home:'Inghilterra',away:'Croazia',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-17',home:'Ghana',away:'Panama',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-23',home:'Inghilterra',away:'Ghana',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-23',home:'Panama',away:'Croazia',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-27',home:'Panama',away:'Inghilterra',homeScore:null,awayScore:null},
+  {group:'L',date:'2026-06-27',home:'Croazia',away:'Ghana',homeScore:null,awayScore:null},
 ];
 // Fasi eliminatorie (TBD = da definire dopo gironi)
 const WC2026_KNOCKOUT=[
