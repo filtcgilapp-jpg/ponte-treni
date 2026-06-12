@@ -703,7 +703,7 @@ const PULSE='https://api.motogp.pulselive.com/motogp/v1/results';
 async function pulseEvents(year){
   return cGet(`${PULSE}/events?seasonYear=${year}`,3*3600000);
 }
-async function pulseRaceResults(dateEvent){
+async function pulseSessionResults(dateEvent, sessionTypeRx){
   const target=dateEvent.slice(0,10);
   const year=target.slice(0,4);
   try{
@@ -714,9 +714,9 @@ async function pulseRaceResults(dateEvent){
     });
     if(!ev)return null;
     const sesData=await cGet(`${PULSE}/sessions?eventId=${ev.id}&categoryId=${MOTO_CAT}`,3*3600000);
-    const rac=(sesData?.sessions||[]).find(s=>/^RAC$/i.test(s.type||s.session_type||''));
-    if(!rac)return null;
-    const resData=await cGet(`${PULSE}/session/${rac.id}`,3*3600000);
+    const ses=(sesData?.sessions||[]).find(s=>sessionTypeRx.test(s.type||s.session_type||''));
+    if(!ses)return null;
+    const resData=await cGet(`${PULSE}/session/${ses.id}`,3*3600000);
     const cls=resData?.classification||[];
     if(!cls.length)return null;
     return cls.slice(0,10).map(r=>({
@@ -727,6 +727,8 @@ async function pulseRaceResults(dateEvent){
     }));
   }catch{return null;}
 }
+async function pulseRaceResults(dateEvent){return pulseSessionResults(dateEvent,/^RAC$/i);}
+async function pulseSprintResults(dateEvent){return pulseSessionResults(dateEvent,/^SPR(INT)?$/i);}
 
 async function espnMotoResults(dateEvent){
   const d0=new Date(dateEvent);const d1=new Date(d0);d1.setDate(d1.getDate()+1);
@@ -793,8 +795,8 @@ app.get('/sport/motogp/last',async(req,res)=>{
   }catch(e){res.status(500).json({error:e.message});}
 });
 
-// ── SPRINT — aggiornare dopo ogni GP ───────────────────────────────────────────
-app.get('/sport/motogp/race/:round/sprint',(req,res)=>{
+// ── SPRINT — R1-R5 hardcoded, R6+ via PulseLive automatico ────────────────────
+app.get('/sport/motogp/race/:round/sprint',async(req,res)=>{
   const round=parseInt(req.params.round)||0;
   const SR={
     1:{raceName:'Thai GP Sprint',results:[{position:'1',name:'Jorge Martín',team:'Aprilia Racing',points:'12'},{position:'2',name:'Pedro Acosta',team:'Red Bull KTM',points:'9'},{position:'3',name:'Marco Bezzecchi',team:'Aprilia Racing',points:'7'},{position:'4',name:'Raúl Fernández',team:'Trackhouse Aprilia',points:'6'},{position:'5',name:'Brad Binder',team:'Red Bull KTM',points:'5'},{position:'6',name:'Ai Ogura',team:'Trackhouse Aprilia',points:'4'},{position:'7',name:'Fabio Di Giannantonio',team:'Pertamina VR46',points:'3'},{position:'8',name:'Enea Bastianini',team:'Tech3 KTM',points:'2'},{position:'9',name:'Marc Márquez',team:'Ducati Lenovo',points:'1'},{position:'10',name:'Luca Marini',team:'Honda HRC',points:'1'}]},
@@ -804,6 +806,13 @@ app.get('/sport/motogp/race/:round/sprint',(req,res)=>{
     5:{raceName:'Spanish GP Sprint',results:[{position:'1',name:'Marc Márquez',team:'Ducati Lenovo',points:'12'},{position:'2',name:'Francesco Bagnaia',team:'Ducati Lenovo',points:'9'},{position:'3',name:'Franco Morbidelli',team:'Pertamina VR46',points:'7'},{position:'4',name:'Pedro Acosta',team:'Red Bull KTM',points:'6'},{position:'5',name:'Johann Zarco',team:'Castrol Honda LCR',points:'5'},{position:'6',name:'Marco Bezzecchi',team:'Aprilia Racing',points:'4'},{position:'7',name:'Jorge Martín',team:'Aprilia Racing',points:'3'},{position:'8',name:'Enea Bastianini',team:'Tech3 KTM',points:'2'},{position:'9',name:'Brad Binder',team:'Red Bull KTM',points:'1'},{position:'10',name:'Luca Marini',team:'Honda HRC',points:'1'}]},
   };
   const sr=SR[round];if(sr?.results?.length>0)return res.json(sr);
+  try{
+    const raceInfo=MOTOGP_2026.find(r=>r.round===round);
+    if(raceInfo?.dateEvent){
+      const results=await pulseSprintResults(raceInfo.dateEvent);
+      if(results?.length)return res.json({raceName:`${raceInfo.strEvent} Sprint`,results});
+    }
+  }catch{}
   res.status(404).json({error:`Nessuna sprint per round ${round}`});
 });
 
