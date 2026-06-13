@@ -613,7 +613,7 @@ const MOTOGP_2026=[
   {round:6,strEvent:'French GP',    dateEvent:'2026-05-10',strVenue:'Bugatti Circuit',                       strCountry:'FRA'},
   {round:7,strEvent:'Catalan GP',   dateEvent:'2026-05-17',strVenue:'Circuit de Barcelona-Catalunya',        strCountry:'CAT'},
   {round:8,strEvent:'Italian GP',   dateEvent:'2026-05-31',strVenue:'Autodromo del Mugello',                 strCountry:'ITA'},
-  {round:9,strEvent:'German GP',    dateEvent:'2026-06-07',strVenue:'Sachsenring',                           strCountry:'GER'},
+  {round:9,strEvent:'German GP',    dateEvent:'2026-07-12',strVenue:'Sachsenring',                           strCountry:'GER'},
   {round:10,strEvent:'Dutch GP',    dateEvent:'2026-06-28',strVenue:'TT Circuit Assen',                      strCountry:'NED'},
   {round:11,strEvent:'Finnish GP',  dateEvent:'2026-07-05',strVenue:'KymiRing',                              strCountry:'FIN'},
   {round:12,strEvent:'British GP',  dateEvent:'2026-07-26',strVenue:'Silverstone Circuit',                   strCountry:'GBR'},
