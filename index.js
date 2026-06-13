@@ -305,6 +305,8 @@ const WC2026_GROUPS={A:[{t:'Messico'},{t:'Corea del Sud'},{t:'Sudafrica'},{t:'Ca
 const WC_IT_MAP={'Mexico':'Messico','South Korea':'Corea del Sud','South Africa':'Sudafrica','Switzerland':'Svizzera','United States':'USA','Morocco':'Marocco','Scotland':'Scozia','Germany':'Germania','Ecuador':'Ecuador','Ivory Coast':'Costa d\'Avorio','Netherlands':'Olanda','Japan':'Giappone','Tunisia':'Tunisia','Belgium':'Belgio','Egypt':'Egitto','Spain':'Spagna','Uruguay':'Uruguay','Saudi Arabia':'Arabia Saudita','Cape Verde':'Capo Verde','France':'Francia','Senegal':'Senegal','Norway':'Norvegia','Argentina':'Argentina','Algeria':'Algeria','Austria':'Austria','Jordan':'Giordania','Portugal':'Portogallo','Colombia':'Colombia','England':'Inghilterra','Croatia':'Croazia','Panama':'Panama','Ghana':'Ghana','Canada':'Canada','Qatar':'Qatar','Brazil':'Brasile','Haiti':'Haiti','Australia':'Australia','Paraguay':'Paraguay','New Zealand':'Nuova Zelanda','Curacao':'Curacao','Cameroon':'Camerun','Venezuela':'Venezuela','Congo DR':'Congo RD','Uzbekistan':'Uzbekistan','Iraq':'Iraq','Bosnia and Herzegovina':'Bosnia-Erz.','Bosnia Herzegovina':'Bosnia-Erz.','Bosnia-Herzegovina':'Bosnia-Erz.','Indonesia':'Indonesia','Serbia':'Serbia','Venezuela':'Venezuela'};
 function wcIt(n){return WC_IT_MAP[n]||n;}
 app.get('/sport/soccer/worldcup2026',async(req,res)=>{
+  const enrichedGroups={};
+  for(const[letter,teams]of Object.entries(WC2026_GROUPS)) enrichedGroups[letter]=teams.map(t=>({...t}));
   try{
     const ESPN_WC='https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world';
     // Costruisci teamToGroup dai dati statici
@@ -337,6 +339,35 @@ app.get('/sport/soccer/worldcup2026',async(req,res)=>{
       }
     }catch{}
     matches.sort((a,b)=>new Date(a.date)-new Date(b.date));
+    // Classifica gironi da ESPN
+    try{
+      const sd=await cGet('https://site.api.espn.com/apis/v2/sports/soccer/fifa.world/standings',300000);
+      for(const grp of(sd?.children||[])){
+        const entries=grp.standings?.entries||[];
+        for(const e of entries){
+          const dn=e.team?.displayName||'';
+          const itName=wcIt(dn)||dn;
+          const stats={};for(const s of(e.stats||[]))stats[s.name]=s.value;
+          for(const[letter,teams]of Object.entries(enrichedGroups)){
+            const team=teams.find(t=>t.t&&(t.t.toLowerCase()===itName.toLowerCase()||t.t.toLowerCase()===dn.toLowerCase()));
+            if(team){
+              team.p=Math.round(stats.points||0);
+              team.gp=Math.round(stats.gamesPlayed||0);
+              team.w=Math.round(stats.wins||0);
+              team.d=Math.round(stats.ties||stats.draws||0);
+              team.l=Math.round(stats.losses||0);
+              team.gd=Math.round(stats.pointDifferential||0);
+              team.gf=Math.round(stats.pointsFor||0);
+              break;
+            }
+          }
+        }
+      }
+      // Ordina ogni girone per punti desc, poi GD desc, poi GF desc
+      for(const letter of Object.keys(enrichedGroups)){
+        enrichedGroups[letter].sort((a,b)=>(b.p||0)-(a.p||0)||(b.gd||0)-(a.gd||0)||(b.gf||0)-(a.gf||0));
+      }
+    }catch{}
     // Tabellone knockout (dal 29 giu)
     const knockout=[];
     try{
@@ -364,8 +395,8 @@ app.get('/sport/soccer/worldcup2026',async(req,res)=>{
           homeScore:played?(h.score??null):null,awayScore:played?(a.score??null):null});
       }
     }catch{}
-    res.json({groups:WC2026_GROUPS,matches,knockout});
-  }catch(e){res.json({groups:WC2026_GROUPS,matches:[],knockout:[]});}
+    res.json({groups:enrichedGroups,matches,knockout});
+  }catch(e){res.json({groups:enrichedGroups&&Object.keys(enrichedGroups).length?enrichedGroups:WC2026_GROUPS,matches:[],knockout:[]});}
 });
 
 
@@ -582,7 +613,7 @@ const MOTOGP_2026=[
   {round:6,strEvent:'French GP',    dateEvent:'2026-05-10',strVenue:'Bugatti Circuit',                       strCountry:'FRA'},
   {round:7,strEvent:'Catalan GP',   dateEvent:'2026-05-17',strVenue:'Circuit de Barcelona-Catalunya',        strCountry:'CAT'},
   {round:8,strEvent:'Italian GP',   dateEvent:'2026-05-31',strVenue:'Autodromo del Mugello',                 strCountry:'ITA'},
-  {round:9,strEvent:'German GP',    dateEvent:'2026-06-14',strVenue:'Sachsenring',                           strCountry:'GER'},
+  {round:9,strEvent:'German GP',    dateEvent:'2026-06-07',strVenue:'Sachsenring',                           strCountry:'GER'},
   {round:10,strEvent:'Dutch GP',    dateEvent:'2026-06-28',strVenue:'TT Circuit Assen',                      strCountry:'NED'},
   {round:11,strEvent:'Finnish GP',  dateEvent:'2026-07-05',strVenue:'KymiRing',                              strCountry:'FIN'},
   {round:12,strEvent:'British GP',  dateEvent:'2026-07-26',strVenue:'Silverstone Circuit',                   strCountry:'GBR'},
