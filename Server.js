@@ -3088,6 +3088,21 @@ const PORT=process.env.PORT||10000;
 // ══════════════════════════════════════════════════════════════════════════════
 // MONDIALI 2026 — USA/Canada/Messico, 11 giu – 19 lug 2026
 // ══════════════════════════════════════════════════════════════════════════════
+// ── World Cup 2026 helpers ────────────────────────────────────────────────────
+function mapWCRoundSlug(slug){
+  return({'round-of-32':'Sedicesimi','round-of-16':'Ottavi','quarterfinals':'Quarti',
+    'semifinals':'Semifinali','3rd-place-match':'3° posto','final':'Finale'})[slug]||null;
+}
+function parseESPNWCTeam(name=''){
+  let m;
+  if((m=name.match(/Round of 32 (\d+) Winner/i)))return`W_R32_${m[1]}`;
+  if((m=name.match(/Round of 16 (\d+) Winner/i)))return`W_R16_${m[1]}`;
+  if((m=name.match(/Quarterfinal (\d+) Winner/i)))return`W_QF_${m[1]}`;
+  if((m=name.match(/Semifinal (\d+) Winner/i)))return`W_SF_${m[1]}`;
+  if((m=name.match(/Semifinal (\d+) Loser/i)))return`L_SF_${m[1]}`;
+  return name;
+}
+
 const WC2026_GROUPS={
   A:[{t:'Messico'},{t:'Sudafrica'},{t:'Corea del Sud'},{t:'Rep. Ceca'}],
   B:[{t:'Canada'},{t:'Bosnia Erzegovina'},{t:'Qatar'},{t:'Svizzera'}],
@@ -3217,7 +3232,74 @@ const WC2026_KNOCKOUT=[
 ];
 
 app.get('/sport/soccer/worldcup2026',async(req,res)=>{
-  res.json({groups:WC2026_GROUPS,matches:WC2026_MATCHES,knockout:WC2026_KNOCKOUT});
+  try{
+    const [gr,kr]=await Promise.all([
+      fetch(`${ESPN}/soccer/fifa.world/scoreboard?dates=20260611-20260627&limit=200`,600000).catch(()=>null),
+      fetch(`${ESPN}/soccer/fifa.world/scoreboard?dates=20260628-20260719&limit=100`,60000).catch(()=>null),
+    ]);
+
+    // ── Fase a gironi ─────────────────────────────────────────────
+    const matchesRaw=[];
+    const teamStats={}; // group → {teamName → {gp,w,d,l,gf,ga,p}}
+    for(const ev of(gr?.events||[])){
+      const comp=ev.competitions?.[0];if(!comp)continue;
+      const alt=comp.altGameNote||'';
+      const gm=alt.match(/Group ([A-L])/i);if(!gm)continue;
+      const grp=gm[1].toUpperCase();
+      const home=comp.competitors?.find(c=>c.homeAway==='home');
+      const away=comp.competitors?.find(c=>c.homeAway==='away');
+      const done=comp.status?.type?.completed;
+      const hn=home?.team?.displayName||'';
+      const an=away?.team?.displayName||'';
+      const hs=done?parseInt(home?.score||'0'):null;
+      const as_=done?parseInt(away?.score||'0'):null;
+      if(!teamStats[grp])teamStats[grp]={};
+      if(hn&&!teamStats[grp][hn])teamStats[grp][hn]={gp:0,gf:0,ga:0,p:0};
+      if(an&&!teamStats[grp][an])teamStats[grp][an]={gp:0,gf:0,ga:0,p:0};
+      if(done&&hs!=null&&as_!=null&&hn&&an){
+        teamStats[grp][hn].gp++;teamStats[grp][an].gp++;
+        teamStats[grp][hn].gf+=hs;teamStats[grp][hn].ga+=as_;
+        teamStats[grp][an].gf+=as_;teamStats[grp][an].ga+=hs;
+        if(hs>as_){teamStats[grp][hn].p+=3;}
+        else if(hs<as_){teamStats[grp][an].p+=3;}
+        else{teamStats[grp][hn].p++;teamStats[grp][an].p++;}
+      }
+      matchesRaw.push({group:grp,date:(ev.date||'').slice(0,10),home:hn,away:an,homeScore:hs,awayScore:as_});
+    }
+    const groups={};
+    for(const[g,teams]of Object.entries(teamStats)){
+      groups[g]=Object.entries(teams)
+        .map(([t,s])=>({t,gp:s.gp,p:s.p,gf:s.gf,gd:s.gf-s.ga}))
+        .sort((a,b)=>(b.p-a.p)||((b.gd??0)-(a.gd??0))||((b.gf??0)-(a.gf??0)));
+    }
+
+    // ── Tabellone eliminatorio ────────────────────────────────────
+    const knockout=[];
+    for(const ev of(kr?.events||[])){
+      const comp=ev.competitions?.[0];if(!comp)continue;
+      const slug=ev.season?.slug||'';
+      const round=mapWCRoundSlug(slug);if(!round)continue;
+      const home=comp.competitors?.find(c=>c.homeAway==='home');
+      const away=comp.competitors?.find(c=>c.homeAway==='away');
+      const done=comp.status?.type?.completed;
+      knockout.push({
+        round,id:String(ev.id||''),date:(ev.date||'').slice(0,10),
+        home:parseESPNWCTeam(home?.team?.displayName||'TBD'),
+        away:parseESPNWCTeam(away?.team?.displayName||'TBD'),
+        homeScore:done?(parseInt(home?.score||'0')||0):null,
+        awayScore:done?(parseInt(away?.score||'0')||0):null,
+      });
+    }
+
+    if(knockout.length===0)return res.json({groups:WC2026_GROUPS,matches:WC2026_MATCHES,knockout:WC2026_KNOCKOUT});
+    res.json({
+      groups:Object.keys(groups).length>0?groups:WC2026_GROUPS,
+      matches:matchesRaw.length>0?matchesRaw:WC2026_MATCHES,
+      knockout,
+    });
+  }catch(e){
+    res.json({groups:WC2026_GROUPS,matches:WC2026_MATCHES,knockout:WC2026_KNOCKOUT});
+  }
 });
 
 // ── DIAGNOSTICA ─────────────────────────────────────────────────────────────
