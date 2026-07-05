@@ -379,16 +379,19 @@ app.get('/sport/soccer/worldcup2026',async(req,res)=>{
         if(!h||!a)continue;
         const hn=h.team?.displayName||h.team?.name||'';
         const an=a.team?.displayName||a.team?.name||'';
-        const inGroup=teamToGroup[wcIt(hn).toLowerCase()]||teamToGroup[hn.toLowerCase()];
-        if(inGroup)continue;
+        // Usa metadati ESPN (note, type, nome evento) + nomi squadra per rilevare il round.
+        // NON filtrare per inGroup: in fase eliminatoria le squadre reali sono
+        // nel dizionario teamToGroup e verrebbero scartate erroneamente.
+        const note=(c.notes?.[0]?.headline||c.type?.text||ev.name||ev.shortName||'').toLowerCase();
         const s=(hn+' '+an).toLowerCase();
+        const combined=note+' '+s;
         let round='';
-        if(s.includes('semifinal winner')||(s.includes('final')&&!s.includes('semifinal')&&!s.includes('quarter')))round='Finale';
-        else if(s.includes('quarterfinal winner')||s.includes('semif'))round='Semifinali';
-        else if(s.includes('semifinal loser'))round='3° posto';
-        else if(s.includes('quarterfinal'))round='Quarti';
-        else if(s.includes('round of 16')||s.includes('round of 32 winner'))round='Ottavi';
-        else if(s.includes('round of 32'))round='Sedicesimi';
+        if(combined.includes('third place')||combined.includes('3rd place')||combined.includes('semifinal loser'))round='3° posto';
+        else if(combined.includes('semifinal winner')||(combined.includes('final')&&!combined.includes('semifinal')&&!combined.includes('quarter')&&!combined.includes('third')&&!combined.includes('3rd')))round='Finale';
+        else if(combined.includes('quarterfinal winner')||combined.includes('semifinal')||combined.includes('semif'))round='Semifinali';
+        else if(combined.includes('quarterfinal')||combined.includes('quarter-final'))round='Quarti';
+        else if(combined.includes('round of 16')||combined.includes('round of 32 winner'))round='Ottavi';
+        else if(combined.includes('round of 32'))round='Sedicesimi';
         if(!round)continue;
         const played=c.status?.type?.completed===true;
         knockout.push({round,date:ev.date,home:wcIt(hn)||hn,away:wcIt(an)||an,
