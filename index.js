@@ -369,6 +369,21 @@ app.get('/sport/soccer/worldcup2026',async(req,res)=>{
       }
     }catch{}
     // Tabellone knockout (dal 29 giu)
+    // Il round si determina dalla data della partita (calendario ufficiale del turno)
+    // e non dal testo delle note ESPN: quel testo esiste solo per gli slot futuri
+    // non ancora determinati (es. "Round of 16 5 Winner") e manca del tutto per le
+    // partite con squadre reali già note, che finivano scartate.
+    const roundByDate=(dateStr)=>{
+      const t=new Date(dateStr).getTime();
+      if(isNaN(t))return'';
+      if(t<Date.UTC(2026,5,28))return'';
+      if(t<Date.UTC(2026,6,4,12))return'Sedicesimi';
+      if(t<Date.UTC(2026,6,9))return'Ottavi';
+      if(t<Date.UTC(2026,6,14))return'Quarti';
+      if(t<Date.UTC(2026,6,18))return'Semifinali';
+      if(t<Date.UTC(2026,6,19))return'3° posto';
+      return'Finale';
+    };
     const knockout=[];
     try{
       const kd=await cGet(`${ESPN_WC}/scoreboard?dates=20260629-20260720&limit=200`,300000);
@@ -379,19 +394,7 @@ app.get('/sport/soccer/worldcup2026',async(req,res)=>{
         if(!h||!a)continue;
         const hn=h.team?.displayName||h.team?.name||'';
         const an=a.team?.displayName||a.team?.name||'';
-        // Usa metadati ESPN (note, type, nome evento) + nomi squadra per rilevare il round.
-        // NON filtrare per inGroup: in fase eliminatoria le squadre reali sono
-        // nel dizionario teamToGroup e verrebbero scartate erroneamente.
-        const note=(c.notes?.[0]?.headline||c.type?.text||ev.name||ev.shortName||'').toLowerCase();
-        const s=(hn+' '+an).toLowerCase();
-        const combined=note+' '+s;
-        let round='';
-        if(combined.includes('third place')||combined.includes('3rd place')||combined.includes('semifinal loser'))round='3° posto';
-        else if(combined.includes('semifinal winner')||(combined.includes('final')&&!combined.includes('semifinal')&&!combined.includes('quarter')&&!combined.includes('third')&&!combined.includes('3rd')))round='Finale';
-        else if(combined.includes('quarterfinal winner')||combined.includes('semifinal')||combined.includes('semif'))round='Semifinali';
-        else if(combined.includes('quarterfinal')||combined.includes('quarter-final'))round='Quarti';
-        else if(combined.includes('round of 16')||combined.includes('round of 32 winner'))round='Ottavi';
-        else if(combined.includes('round of 32'))round='Sedicesimi';
+        const round=roundByDate(ev.date);
         if(!round)continue;
         const played=c.status?.type?.completed===true;
         knockout.push({round,date:ev.date,home:wcIt(hn)||hn,away:wcIt(an)||an,
